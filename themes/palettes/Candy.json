@@ -1,0 +1,130 @@
+{
+  "Comment": "Soft rose surfaces, berry ink, and mint hover states: a cheerful pastel light palette.",
+  "Colors": {
+    "background": "#fff1f5ff",
+    "panel": "#efdae4ff",
+    "view": "#fffbfdff",
+    "text": "#512f45ff",
+    "outline": "#c594b0ff",
+    "button": "#ffe5f0ff",
+    "hover": "#d5eee8ff",
+    "accent": "#bd487fff",
+    "highlight": "#f3bad5ff",
+    "disabled": "#ebdbe2ff",
+    "disabledtext": "#866277ff",
+    "alternate": "#f7e2ecff",
+    "shadow": "#743e6055"
+  },
+  "Window": {
+    "Padding": 8,
+    "BGColor": "background",
+    "TitleBGColor": "panel",
+    "TitleColor": "text",
+    "BorderColor": "outline",
+    "SizeTabColor": "outline",
+    "DragbarColor": "panel",
+    "HoverTitleColor": "text",
+    "HoverColor": "hover",
+    "ActiveColor": "accent",
+    "TitleTextColor": "text",
+    "ShadowSize": 14,
+    "ShadowColor": "shadow",
+    "ShadowFalloff": 2
+  },
+  "Button": {
+    "TextColor": "text",
+    "Color": "button",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Text": {
+    "TextColor": "text",
+    "Color": "alternate",
+    "HoverColor": "highlight",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Checkbox": {
+    "TextColor": "text",
+    "Color": "highlight",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Radio": {
+    "TextColor": "text",
+    "Color": "highlight",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Input": {
+    "TextColor": "text",
+    "Color": "view",
+    "HoverColor": "view",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Slider": {
+    "TextColor": "text",
+    "Color": "outline",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SliderFilled": "accent",
+    "SelectedColor": "accent",
+    "DisabledTextColor": "disabledtext"
+  },
+  "Dropdown": {
+    "TextColor": "text",
+    "Color": "button",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "highlight",
+    "MaxVisible": 0,
+    "DisabledTextColor": "disabledtext",
+    "ShadowSize": 12,
+    "ShadowColor": "shadow",
+    "ShadowFalloff": 2
+  },
+  "Tab": {
+    "TextColor": "text",
+    "Color": "panel",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "SelectedColor": "background",
+    "DisabledColor": "disabled",
+    "DisabledTextColor": "disabledtext"
+  },
+  "RecommendedStyle": "Borderless",
+  "Progress": {
+    "TextColor": "text",
+    "Color": "view",
+    "HoverColor": "hover",
+    "ClickColor": "accent",
+    "OutlineColor": "outline",
+    "DisabledColor": "disabled",
+    "SelectedColor": "accent",
+    "DisabledTextColor": "disabledtext"
+  }
+}

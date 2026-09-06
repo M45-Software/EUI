@@ -1,0 +1,6 @@
+/studio
+/basic
+/*.exe
+*.test
+coverage.out
+.DS_Store
