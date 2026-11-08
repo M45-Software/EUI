@@ -26,19 +26,30 @@ jobs:
         run: xvfb-run -a go run ./examples/studio -tab Editor -screenshot /tmp/studio-editor.png
       - name: Text editor rendering regression
         run: EUI_TEXT_EDIT_CAPTURE=/tmp/text-editor.png xvfb-run -a go test -run '^TestRenderTextEditing$' .
+      - name: Form validation rendering regression
+        run: EUI_FORM_CAPTURE=/tmp/form.png xvfb-run -a go test -run '^TestRenderFormValidation$' .
+      - name: Gamepad navigation rendering regression
+        run: EUI_GAMEPAD_CAPTURE=/tmp/gamepad.png xvfb-run -a go test -run '^TestRenderGamepadNavigation$' .
+      - name: Modal rendering regression
+        run: EUI_MODAL_CAPTURE=/tmp/modal.png xvfb-run -a go test -run '^TestRenderModalLayers$' .
       - name: Independent context rendering regression
         run: EUI_CONTEXT_CAPTURE=/tmp/contexts.png xvfb-run -a go test -run '^TestRenderIndependentContexts$' .
       - name: Large-document rendering regression
         run: EUI_LARGE_CAPTURE=/tmp/large-document.png xvfb-run -a go test -run '^TestRenderLargeDocument$' .
+      - name: Incremental-document rendering regression
+        run: EUI_INCREMENTAL_CAPTURE=/tmp/incremental-document.png xvfb-run -a go test -run '^TestRenderIncrementalDocument$' .
       - name: Large-interface benchmark smoke test
         run: |
           set -o pipefail
           xvfb-run -a go test -run '^$' -bench '^BenchmarkLargeInterface($|Frames$)' -benchtime=1x -count=1 -benchmem . | tee /tmp/large-ui-benchmarks.txt
+          xvfb-run -a go test -run '^$' -bench '^BenchmarkDocumentEdits$' -benchtime=1x -count=1 -benchmem . | tee /tmp/document-benchmarks.txt
       - name: Preserve performance smoke results
         uses: actions/upload-artifact@v4
         with:
           name: large-ui-linux
-          path: /tmp/large-ui-benchmarks.txt
+          path: |
+            /tmp/large-ui-benchmarks.txt
+            /tmp/document-benchmarks.txt
       - name: IME composition rendering regression
         run: EUI_IME_CAPTURE=/tmp/ime-composition.png xvfb-run -a go test -run '^TestRenderIMEComposition$' .
       - name: Keyboard focus rendering regression

@@ -20,6 +20,7 @@ are:
 ```sh
 go test -run '^$' -bench '^BenchmarkLargeInterface$' -benchmem -benchtime=500ms -count=5 .
 go test -run '^$' -bench '^BenchmarkLargeInterfaceFrames$' -benchmem -benchtime=500ms -count=5 .
+go test -run '^$' -bench '^BenchmarkDocumentEdits$' -benchmem -benchtime=500ms -count=5 .
 ```
 
 On headless Linux, prefix each Go command with `xvfb-run -a`. Run rendering
@@ -123,11 +124,13 @@ A data-driven virtual list is a future option when target-device profiles show
 row traversal or retained memory dominating. It needs explicit stable row
 identity, focus/selection retention, accessibility, and ownership rules.
 
-Cold edits and full wrapped resize still take tens of milliseconds for the
-10,000-line workload. This suite now exposes those costs; it does not make a
-full editor incremental. Line-level invalidation, a document buffer, and lazy
-wrapping are the next candidates if such documents need uninterrupted editing.
-Do not infer that a 1.49 ms scroll frame means a 10,000-line edit is equally fast.
+The earlier results above predate the incremental editor work below. Cold loads
+and font changes still require a full parse. Immutable public `Text`/`TextPtr`
+snapshots require copying the changed document, and complete visual-row metadata
+still scales with the number of rows. Large paste/replacement, edits far from
+the gap, word operations, and application-provided whole-document highlighters
+can do document-wide work. Do not infer that a fast scroll frame establishes
+edit latency on a different workload or target device.
 
 Validation checks Unicode count invalidation, caret boundaries, reuse without
 stale offsets, and fractional viewport clipping. A pixel regression compares a
@@ -135,3 +138,79 @@ deeply scrolled 10,000-line editor to its local excerpt at 1×, 1.5×, and 2×,
 including highlighting and selection. Cache regressions compare direct/cached
 pixels across eviction and reuse and enforce active/idle memory bounds. Timing
 numbers are observations, not flaky pass/fail assertions.
+
+
+## Incremental document editing (2026-11-08)
+
+This comparison starts from the buffer/layout implementation in `29296bf`, with
+the same modal/form/gamepad changes present in both trees. It uses the unchanged
+`BenchmarkLargeInterface/Document` fixtures and the same machine/Go configuration
+as above. Each edit sample performs ten insert/layout/undo/layout cycles; medians
+use five samples. Each resize sample performs 160 operations, covering the entire
+existing 260–419 pixel width sweep; medians use three samples. Fixed operation
+counts ensure both versions visit the same widths. The final comparison ran
+without concurrent tests or benchmarks. Figures measure CPU work and allocated
+Go memory, rather than retained memory, GPU work, or presented FPS.
+
+| Workload | Lines | Before | After | Allocated MB/op before → after | Allocations/op before → after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Insert, layout, undo, layout | 1,000 | 8.61 ms | 0.137 ms | 5.79 → 0.332 | 12,016 → 14 |
+| Insert, layout, undo, layout | 10,000 | 85.06 ms | 1.194 ms | 57.74 → 3.214 | 120,016 → 14 |
+| Wrapped resize | 1,000 | 3.48 ms | 0.333 ms | 2.66 → 0.496 | 6,105 → 409 |
+| Wrapped resize | 10,000 | 65.86 ms | 4.554 ms | 27.28 → 4.915 | 61,006 → 4,067 |
+
+For the 10,000-line fixtures this is about 71× faster for edit/undo and 14× for
+resizing. These ratios describe these fixed workloads and machine, not a general
+latency guarantee. Cached layout/caret lookup remains constant-time; cold layout
+still rebuilds the document. See the raw samples, environment, and editor source
+hashes:
+
+- [Environment and source hashes](performance-results/incremental/environment.txt)
+- [Edit/undo before](performance-results/incremental/before-EditAtEnd.txt) and [after](performance-results/incremental/after-EditAtEnd.txt)
+- [Resize before](performance-results/incremental/before-WrappedResize.txt) and [after](performance-results/incremental/after-WrappedResize.txt)
+
+Reproduce the fixed samples in each source tree, running one at a time:
+
+```sh
+CGO_ENABLED=0 xvfb-run -a go test -run '^$' \
+  -bench '^BenchmarkLargeInterface/Document/(1000|10000)/EditAtEnd$' \
+  -benchtime=10x -count=5 -benchmem .
+CGO_ENABLED=0 xvfb-run -a go test -run '^$' \
+  -bench '^BenchmarkLargeInterface/Document/(1000|10000)/WrappedResize$' \
+  -benchtime=160x -count=3 -benchmem .
+```
+
+The editor now uses a UTF-8 byte gap buffer. Nearby changes update the gap and
+rune count without allocating a whole-document rune slice. Undo/redo reconcile
+the differing region of immutable snapshots. Large deletions shrink the buffer's
+retained capacity. Public values and change events retain their existing
+immediate snapshot semantics, so publishing edited text is still O(document
+bytes).
+
+Layout reuses unchanged paragraphs' shaped display, rune/byte mappings and
+grapheme boundaries, including unchanged middle blocks after multiple edits,
+adjusting absolute source offsets in new row metadata.
+Published earlier layouts retain their geometry. Source slices are rebound to
+the current document, avoiding retention of a different full old snapshot per
+unchanged paragraph. New font faces invalidate measured data. Password layouts
+continue deriving grapheme stops from the secret, not the display mask.
+
+Each paragraph retains at most two wrapping partitions. A partition is reused
+only inside a measured width interval that preserves its exact break points;
+other paragraphs rewrap when their breaks change. Complete visual-row counts,
+scrollbars, selection and caret lookup remain exact. Reflow preallocates row
+metadata from the preceding layout. Warm IME display text is cached until the
+preedit or source changes. Character/line navigation uses the paragraph index,
+including CRLF and composed Unicode character boundaries.
+
+`BenchmarkDocumentEdits` adds middle typing, middle wrapped typing, a 500-line
+paste, real Backspace commands, and warm composition layout at both document
+sizes. The benchmark script and CI smoke configuration include these workloads.
+Tests compare random UTF-8 gap edits/restores against rune-string oracles, local
+edits and resize partitions against cold layout, and source navigation against
+the previous whole-document rules. The new incremental pixel regression compares
+edits, undo/redo, resize, highlighting and IME rendering with a fresh layout in
+both palettes at three scales. An isolated native Linux X11/IBus session verifies
+10,000-line composition commit/cancel, undo/redo, Backspace and wrap toggles.
+Windows tests and rendering are checked under Wine; Windows/macOS binaries are
+cross-built. Hosted CI and real Windows/macOS IME sessions remain unavailable.

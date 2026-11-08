@@ -15,7 +15,7 @@ fi
   go env GOOS GOARCH CGO_ENABLED
   printf 'BENCHTIME=%s COUNT=%s\n' "${BENCHTIME:-500ms}" "${COUNT:-5}"
 } > "$output_dir/environment.txt"
-for suite in BenchmarkLargeInterface BenchmarkLargeInterfaceFrames; do
+for suite in BenchmarkLargeInterface BenchmarkLargeInterfaceFrames BenchmarkDocumentEdits; do
   "${runner[@]}" go test -run '^$' -bench "^${suite}$" -benchmem \
     -benchtime="${BENCHTIME:-500ms}" -count="${COUNT:-5}" . | tee "$output_dir/$suite.txt"
 done

@@ -20,6 +20,7 @@ type textEditSnapshot struct {
 }
 
 type textEditState struct {
+	buffer             *editBuffer
 	composition        *editComposition
 	known              string
 	runeCount          int
@@ -149,9 +150,13 @@ func trimTextHistory(history []textEditSnapshot) []textEditSnapshot {
 }
 
 func (item *itemData) setEditedText(value string) {
+	item.setEditedDocument(value, utf8.RuneCountInString(value), nil)
+}
+
+func (item *itemData) setEditedDocument(value string, count int, buffer *editBuffer) {
 	if item.HideText {
 		item.SecretText = value
-		item.Text = strings.Repeat("*", len([]rune(value)))
+		item.Text = strings.Repeat("*", count)
 	} else {
 		item.Text = value
 	}
@@ -162,33 +167,36 @@ func (item *itemData) setEditedText(value string) {
 		}
 	}
 	item.textEdit.known = value
-	item.textEdit.runeCount = utf8.RuneCountInString(value)
-	item.textEdit.layout = nil
+	item.textEdit.runeCount = count
+	item.textEdit.buffer = buffer
 }
 
 func (item *itemData) emitTextChanged() {
 	item.resetCaret()
+	item.validateFormEdit()
 	item.emitEvent(UIEvent{Type: EventInputChanged, Text: item.Text})
 }
 
 func (item *itemData) editReplace(start, end int, insert, group string) {
 	item.editReplaceAt(start, end, insert, group, -1, false)
 }
-func (item *itemData) editReplaceAt(start, end int, insert, group string, caret int, fromIME bool) {
+func (item *itemData) editReplaceAt(start, end int, insert, group string, caret int, fromIME bool) bool {
 	ctx := item.ui()
 
 	if !fromIME {
 		item.CancelComposition()
 	}
 	s := item.editor()
-	runes := []rune(item.editText())
-	start, end = max(0, min(start, len(runes))), max(0, min(end, len(runes)))
+	start, end = max(0, min(start, s.runeCount)), max(0, min(end, s.runeCount))
 	if start > end {
 		start, end = end, start
 	}
-	value := string(runes[:start]) + insert + string(runes[end:])
+	if s.buffer == nil {
+		s.buffer = newEditBuffer(item.editText())
+	}
+	value := s.buffer.replace(start, end, insert)
 	if value == item.editText() {
-		return
+		return false
 	}
 	if !item.HideText {
 		if group == "" || group != s.group || ctx.updateNow.Sub(s.changed) > time.Second || len(s.redo) > 0 {
@@ -197,13 +205,14 @@ func (item *itemData) editReplaceAt(start, end int, insert, group string, caret 
 		s.redo = nil
 	}
 	s.group, s.changed, s.hasPreferredX = group, ctx.updateNow, false
-	item.setEditedText(value)
-	pos := start + len([]rune(insert))
+	item.setEditedDocument(value, s.buffer.runes, s.buffer)
+	pos := s.buffer.gapRune
 	if caret >= 0 {
 		pos = caret
 	}
 	item.setEditSelection(pos, pos)
 	item.emitTextChanged()
+	return true
 }
 
 func (item *itemData) normalizeEditText(value string) string {
@@ -236,7 +245,7 @@ func (item *itemData) editInsert(value, group string) {
 	}
 	if item.textLimit > 0 {
 		runes := []rune(value)
-		available := max(0, item.textLimit-len([]rune(item.editText()))+(end-start))
+		available := max(0, item.textLimit-item.editor().runeCount+(end-start))
 		value = string(runes[:min(len(runes), available)])
 		if value == "" {
 			return
@@ -254,8 +263,8 @@ func (item *itemData) ReplaceText(value string) {
 		return
 	}
 	before := item.editSnapshot()
-	item.editReplace(0, len([]rune(item.editText())), value, "")
-	n := len([]rune(item.editText()))
+	item.editReplace(0, item.editor().runeCount, value, "")
+	n := item.editor().runeCount
 	item.CursorPos = max(0, min(before.cursor, n))
 	item.SelectStart = max(0, min(before.anchor, n))
 	item.SelectEnd = max(0, min(before.end, n))
@@ -307,7 +316,12 @@ func (item *itemData) editUndo(redo bool) {
 	*to = trimTextHistory(append(*to, item.editSnapshot()))
 	*from = (*from)[:len(*from)-1]
 	s.group, s.hasPreferredX = "", false
-	item.setEditedText(snapshot.text)
+	if s.buffer != nil {
+		s.buffer.restore(item.editText(), snapshot.text)
+		item.setEditedDocument(snapshot.text, s.buffer.runes, s.buffer)
+	} else {
+		item.setEditedText(snapshot.text)
+	}
 	item.CursorPos, item.SelectStart, item.SelectEnd = snapshot.cursor, snapshot.anchor, snapshot.end
 	ctx.selectedTextItem = item
 	item.emitTextChanged()
@@ -463,7 +477,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 			}
 		case ebiten.KeyA:
 			s.group = ""
-			item.editSelect(0, len([]rune(item.editText())))
+			item.editSelect(0, s.runeCount)
 			return true
 		case ebiten.KeyZ:
 			item.editUndo(shift)
@@ -481,7 +495,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 	}
 	boundary := func() int {
 		if mods.Line() {
-			a, b := editLineBounds(item.editText(), pos)
+			a, b := item.sourceLineBounds(pos)
 			if key == ebiten.KeyArrowLeft || key == ebiten.KeyArrowRight {
 				a, b = item.editVisualLineBounds()
 			}
@@ -493,7 +507,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 		if mods.Word() {
 			return editWordBoundary(item.editText(), pos, direction, mods.Mac)
 		}
-		return editCharBoundary(item.editText(), pos, direction)
+		return item.charBoundary(pos, direction)
 	}
 	switch key {
 	case ebiten.KeyArrowLeft, ebiten.KeyArrowRight:
@@ -514,7 +528,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 		s.hasPreferredX = false
 		a, b := item.editVisualLineBounds()
 		if mods.Shortcut() {
-			a, b = 0, len([]rune(item.editText()))
+			a, b = 0, s.runeCount
 		}
 		pos = b
 		if key == ebiten.KeyHome {
@@ -529,7 +543,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 			return false
 		}
 		if mods.Line() {
-			pos = len([]rune(item.editText()))
+			pos = s.runeCount
 			if direction < 0 {
 				pos = 0
 			}
@@ -571,7 +585,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 
 func (item *itemData) textCompletion() string {
 	if item.CompleteText == nil || item.Multiline || item.HideText || !item.Focused || item.isDisabled() ||
-		item.SelectStart != item.SelectEnd || item.CursorPos != len([]rune(item.editText())) {
+		item.SelectStart != item.SelectEnd || item.CursorPos != item.editor().runeCount {
 		return ""
 	}
 	suffix := item.CompleteText(item.editText())
@@ -583,7 +597,7 @@ func (item *itemData) textCompletion() string {
 
 func (item *itemData) editVisualLineBounds() (int, int) {
 	if !item.WordWrap || !item.Multiline {
-		return editLineBounds(item.editText(), item.CursorPos)
+		return item.sourceLineBounds(item.CursorPos)
 	}
 	row, _ := item.editCaret()
 	line := item.editLayout().lines[row]

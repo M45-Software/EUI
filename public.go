@@ -70,8 +70,8 @@ func (ctx *Context) SetMiddleClickMove(enabled bool) {
 	ctx.middleClickMove = enabled
 }
 
-// SetKeyboardInputCaptured pauses EUI keyboard actions while leaving pointer
-// and window controls active.
+// SetKeyboardInputCaptured pauses EUI keyboard and gamepad navigation actions
+// while leaving pointer and window controls active.
 func (ctx *Context) SetKeyboardInputCaptured(captured bool) {
 	ctx.mustAlive()
 

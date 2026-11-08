@@ -76,6 +76,10 @@ func focusAvailable(it *itemData) bool {
 	if !controlFocusable(it) {
 		return false
 	}
+	if it.ctx != nil && (it.ctx.disposed || !it.ctx.modalItemAllowed(it)) {
+		return false
+	}
+
 	for parent := it.Parent; parent != nil; parent = parent.Parent {
 		if parent.Disabled || parent.Invisible {
 			return false
@@ -162,7 +166,7 @@ func (ctx *Context) focusControl(it *itemData, visible bool) bool {
 }
 
 func (ctx *Context) focusNext(win *windowData, backward bool) bool {
-	if win == nil || !win.Open {
+	if win == nil || !win.Open || !ctx.modalAllows(win) {
 		return false
 	}
 	ctx.closeAllDropdowns()
@@ -572,7 +576,7 @@ func (ctx *Context) pollControlKeyboard(shift bool, mods inputkeys.Modifiers) bo
 	for _, key := range []ebiten.Key{ebiten.KeyArrowLeft, ebiten.KeyArrowRight, ebiten.KeyArrowUp, ebiten.KeyArrowDown, ebiten.KeyHome, ebiten.KeyEnd, ebiten.KeyPageUp, ebiten.KeyPageDown} {
 		held = held || ctx.keyPressed(key)
 	}
-	if !held {
+	if !held && !ctx.gamepadSliderHeld() {
 		ctx.finishKeyboardSlider()
 	}
 	handled := false
@@ -594,7 +598,7 @@ func (ctx *Context) pollControlKeyboard(shift bool, mods inputkeys.Modifiers) bo
 
 func (ctx *Context) activeContextMenu() *itemData {
 	for i := len(ctx.contextMenus) - 1; i >= 0; i-- {
-		if menu := ctx.contextMenus[i]; menu != nil && menu.Open {
+		if menu := ctx.contextMenus[i]; menu != nil && menu.Open && menu.modalOwner == ctx.modalWindow() {
 			return menu
 		}
 	}
@@ -604,6 +608,10 @@ func (ctx *Context) activeContextMenu() *itemData {
 // F6 visits every interactive window in registration order, independently of
 // z-order changes caused by focusing it. Empty/background windows are skipped.
 func (ctx *Context) focusNextWindow(backward bool) bool {
+	if modal := ctx.modalWindow(); modal != nil {
+		return ctx.focusNext(modal, backward)
+	}
+
 	ctx.CloseContextMenus()
 	ctx.closeAllDropdowns()
 	var available []*windowData

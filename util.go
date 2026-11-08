@@ -323,6 +323,7 @@ func (item *itemData) updateText(value string) {
 	item.SelectEnd = max(0, min(item.SelectEnd, n))
 	item.selecting = false
 	item.tooltipW, item.tooltipH = 0, 0
+	item.validateFormEdit()
 	item.runtimeChanged(!editing)
 }
 

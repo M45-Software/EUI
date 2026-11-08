@@ -37,6 +37,8 @@ type TextInputEvent struct {
 }
 
 type editComposition struct {
+	display, displaySource       string
+	displayReady, displayMasked  bool
 	geometry                     inputGeometry
 	text                         string
 	selectionStart, selectionEnd int
@@ -87,9 +89,9 @@ func (item *itemData) clearComposition() {
 		return
 	}
 	item.textEdit.composition = nil
-	item.textEdit.layout = nil
 	item.textEdit.followCaret = true
 	invalidateFocus(item)
+	item.validateFormEdit()
 }
 func (item *itemData) activeComposition() *editComposition {
 	ctx := item.ui()
@@ -130,7 +132,6 @@ func (item *itemData) setComposition(value string, start, end int) {
 		c.geometry = item.inputGeometry()
 	}
 	state.composition = c
-	state.layout = nil
 	state.followCaret = true
 	state.caretOn = true
 	ctx.composingItem = item
@@ -141,12 +142,17 @@ func (item *itemData) displayEditText() string {
 	if c == nil {
 		return item.Text
 	}
+	if c.displayReady && c.displaySource == item.Text && c.displayMasked == item.HideText {
+		return c.display
+	}
 	before := []rune(item.Text)
 	value := c.text
 	if item.HideText {
 		value = strings.Repeat("*", utf8.RuneCountInString(value))
 	}
-	return string(before[:c.start]) + value + string(before[c.end:])
+	c.display = string(before[:c.start]) + value + string(before[c.end:])
+	c.displaySource, c.displayReady, c.displayMasked = item.Text, true, item.HideText
+	return c.display
 }
 func (item *itemData) displayEditCaret() int {
 	if c := item.activeComposition(); c != nil {
@@ -188,12 +194,9 @@ func (item *itemData) applyIMECommit(value string, replacement *TextReplacement)
 
 func (item *itemData) commitIMEEdit(start, end int, value string, caret int) {
 	item.clearComposition()
-	runes := []rune(item.editText())
-	if string(runes[:start])+value+string(runes[end:]) == item.editText() {
+	if !item.editReplaceAt(start, end, value, "", caret, true) {
 		item.setEditSelection(caret, caret)
-		return
 	}
-	item.editReplaceAt(start, end, value, "", caret, true)
 }
 
 func (ctx *Context) pollTextInput() (handled, suppressText bool, err error) {

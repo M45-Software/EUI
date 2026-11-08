@@ -72,6 +72,10 @@ func (ctx *Context) tileDividerCoveredByStandaloneWindow(p point) bool {
 }
 
 func (ctx *Context) updateTileDividerInput(p point, click bool) (handled bool, cursor ebiten.CursorShapeType) {
+	if ctx.modalWindow() != nil {
+		return false, ebiten.CursorShapeDefault
+	}
+
 	if ctx.activeTileDivider >= 0 && !ctx.pointerPressed() {
 		ctx.activeTileDivider = -1
 	}

@@ -155,6 +155,7 @@ func (target *windowData) RemoveWindow() {
 			ctx.windows = append(ctx.windows[:i], ctx.windows[i+1:]...)
 			win.deallocate()
 			win.Open = false
+			ctx.retireModal(target)
 			return
 		}
 	}
@@ -458,6 +459,9 @@ func (ctx *Context) NewProgressBar() (*itemData, *EventHandler) {
 // Bring a window to the front
 func (target *windowData) BringForward() {
 	ctx := target.ui()
+	if !ctx.modalAllows(target) {
+		return
+	}
 
 	if target.AlwaysDrawFirst {
 		// Background windows stay behind ordinary UI, but multiple background
@@ -497,6 +501,10 @@ func (target *windowData) MarkOpen() {
 	if !wasOpen && target.OnOpen != nil {
 		target.OnOpen()
 	}
+	if !target.Open || ctx.disposed || ctx.disposePending {
+		return
+	}
+
 	found := false
 	for _, win := range ctx.windows {
 		if win == target {
@@ -548,17 +556,33 @@ func (target *windowData) Toggle() {
 
 func (target *windowData) Close() {
 	ctx := target.ui()
+	if target.closing {
+		return
+	}
+	target.closing = true
+	defer func() { target.closing = false }()
+	if !target.Open {
+		target.clearInteraction()
+		target.deallocate()
+		ctx.retireModal(target)
+		closeDropdowns(target.Contents)
+		return
+	}
 
 	if target.BeforeClose != nil && !target.BeforeClose() {
 		return
 	}
-	closeDropdowns(target.Contents)
+	if ctx.disposed || ctx.disposePending || !target.Open {
+		return
+	}
 	target.Open = false
 	target.clearInteraction()
+	target.deallocate()
+	ctx.retireModal(target)
+	closeDropdowns(target.Contents)
 	if target.OnClose != nil {
 		target.OnClose()
 	}
-	target.deallocate()
 	if ctx.WindowStateChanged != nil {
 		ctx.WindowStateChanged()
 	}

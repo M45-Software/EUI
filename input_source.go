@@ -31,9 +31,11 @@ type InputFrame struct {
 	MouseButtons       []ebiten.MouseButton
 	PointerX, PointerY int
 	Touches            []TouchPoint
-	WheelX, WheelY     float64
-	Text               string
-	Mac                bool
+	// Gamepads lists connected standard-layout controllers and all held inputs.
+	Gamepads       []GamepadInput
+	WheelX, WheelY float64
+	Text           string
+	Mac            bool
 	// TextInput is an ordered packet of composition notifications for this tick.
 	// It takes precedence over Text; active preedit also suppresses ordinary keys.
 	TextInput []TextInputEvent
@@ -85,6 +87,7 @@ func (ctx *Context) SetInputSource(source InputSource) InputSource {
 	ctx.mposOld = Point{}
 	ctx.inputSource = source
 	ctx.sampledInput = inputState{ctx: ctx}
+	ctx.gamepad = gamepadNavigation{enabled: ctx.gamepad.enabled, awaitNeutral: true}
 	ctx.wheelLimiter = rate.NewLimiter(rate.Every(125*time.Millisecond), 1)
 	return previous
 }
@@ -109,7 +112,8 @@ func resetInputTree(items []*itemData) {
 }
 
 type inputState struct {
-	ctx *Context
+	gamepads, nextGamepads map[ebiten.GamepadID]gamepadSample
+	ctx                    *Context
 
 	textInput                              []TextInputEvent
 	unfocused                              bool
@@ -148,7 +152,7 @@ func (ctx *Context) nativeInputFrame() InputFrame {
 	x, y := ebiten.CursorPosition()
 	wx, wy := ebiten.Wheel()
 	ctx.nativeChars = ebiten.AppendInputChars(ctx.nativeChars[:0])
-	return InputFrame{Time: time.Now(), Keys: ctx.nativeKeys, MouseButtons: ctx.nativeButtons, PointerX: x, PointerY: y, Touches: ctx.nativeTouches, WheelX: wx, WheelY: wy, Text: string(ctx.nativeChars), Mac: runtime.GOOS == "darwin", Unfocused: !ebiten.IsFocused()}
+	return InputFrame{Time: time.Now(), Keys: ctx.nativeKeys, MouseButtons: ctx.nativeButtons, PointerX: x, PointerY: y, Touches: ctx.nativeTouches, Gamepads: ctx.nativeGamepadInputs(), WheelX: wx, WheelY: wy, Text: string(ctx.nativeChars), Mac: runtime.GOOS == "darwin", Unfocused: !ebiten.IsFocused()}
 }
 
 func (s *inputState) sample(frame InputFrame) error {
@@ -163,6 +167,11 @@ func (s *inputState) sample(frame InputFrame) error {
 	if s.ready && frame.Time.Before(s.now) {
 		return fmt.Errorf("eui: input frame time moved backwards")
 	}
+	for _, pad := range frame.Gamepads {
+		if math.IsNaN(pad.LeftX) || math.IsNaN(pad.LeftY) || math.IsInf(pad.LeftX, 0) || math.IsInf(pad.LeftY, 0) {
+			return fmt.Errorf("eui: gamepad axes must be finite")
+		}
+	}
 	for _, event := range frame.TextInput {
 		if event.Kind > TextInputEnd || !utf8.ValidString(event.Text) {
 			return fmt.Errorf("eui: invalid text input event")
@@ -172,6 +181,7 @@ func (s *inputState) sample(frame InputFrame) error {
 		}
 	}
 
+	s.sampleGamepads(frame.Gamepads)
 	var keys [ebiten.KeyMax + 1]bool
 	for _, key := range frame.Keys {
 		if key >= 0 && key <= ebiten.KeyMax {
@@ -297,6 +307,7 @@ func (ctx *Context) sampleInput() error {
 		frame.Keys = nil
 		frame.MouseButtons = nil
 		frame.Touches = nil
+		frame.Gamepads = nil
 		frame.Text = ""
 		frame.TextInput = nil
 		frame.WheelX, frame.WheelY = 0, 0

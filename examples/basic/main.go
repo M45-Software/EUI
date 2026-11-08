@@ -30,7 +30,7 @@ func main() {
 	win.AutoSize, win.Movable, win.Closable = true, true, true
 	label := ui.NewLabel("A UI with no external assets")
 	button := ui.NewActionButton("Open dialog", func() {
-		ui.ShowPopup("Hello", "This dialog belongs entirely to EUI.", []eui.PopupButton{{Text: "OK"}})
+		ui.ShowModal("Hello", "This dialog belongs entirely to EUI.", []eui.PopupButton{{Text: "OK", Default: true, Cancel: true}})
 	})
 	swatch := ui.NewColorSwatch("Accent", ui.AccentColor(), nil, func(c eui.Color) {
 		label.Text = "Color selected"

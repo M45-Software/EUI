@@ -238,6 +238,99 @@ column arrangements at application-specific breakpoints, as Studio does, rather
 than shrinking every control. `ScrollIntoView()` reveals a control without
 changing its focus, caret, or selection.
 
+## Gamepad navigation
+
+Call `ui.SetGamepadNavigation(true)` to opt in. Native input uses controllers
+with Ebitengine standard-layout mappings. Replay sources supply one `GamepadInput`
+per connected controller in `InputFrame.Gamepads`; omitted IDs disconnect. Buttons
+are all held standard buttons, and `LeftX`/`LeftY` are stick axes. Non-finite axes
+reject the entire frame; finite values clamp to [-1, 1]. Duplicate IDs use their
+first entry and invalid IDs/buttons are ignored. Input slices are copied into
+state during the one frame sample and are never retained.
+
+| Control | Behavior |
+| --- | --- |
+| D-pad / left stick | Move focus spatially within the active window; reveal offscreen controls |
+| Bottom face button | Activate buttons, checkboxes and radios; open/select dropdowns; enter/finish adjustment |
+| Right face button | Back: composition, menu/dropdown, search, adjustment, then modal Cancel/close |
+| Shoulder buttons | Previous/next focus stop, with wrapping |
+| Menu button | Next window; trapped inside a modal |
+
+Sliders, color wheels and tab strips require Confirm to enter adjustment mode.
+Directions then use their normal keyboard adjustments; Confirm or Back finishes.
+This lets spatial navigation leave a slider without changing its value. Radios
+change only on Confirm. On an editable field, directions move focus without
+editing text; Confirm invokes its window's default action. Gamepads do not
+provide text entry or an on-screen keyboard. While IME preedit is active only
+Back can cancel it; other navigation waits for fresh neutral input.
+
+The first controller with navigation intent acquires ownership, with the lowest
+ID winning simultaneous intent. It remains owner until disconnected or routing
+is reset. A controller first seen held must return to neutral before acting.
+Stick engagement is 0.45 with a 0.30 release threshold; the dominant axis wins,
+horizontal breaks exact ties, D-pad overrides the stick, and opposed D-pad
+buttons cancel. Direction repeat begins on tick 25, then every 6 Update ticks.
+Confirm, Back, shoulder and menu actions never repeat while held.
+
+Modal transitions and controller/input handoffs suppress held inputs until
+neutral. `SetInputEnabled(false)` and `SetKeyboardInputCaptured(true)` also
+suspend gamepad navigation. Physical keyboard/pointer actions have precedence
+over simultaneous pad input. Configuration, disconnect, and routing handoffs
+cancel adjustment capture without synthesizing a slider release. Ordinary
+direction release emits the normal changed slider release event.
+
+`ActiveGamepad` returns the owner; `GamepadInputHandled` lets the host reserve
+claimed navigation input. Route shared native devices to one enabled context.
+`GamepadCancelHandler` receives Back when no EUI layer consumes it.
+`NavigationPrompts()` returns host-renderable action/label pairs for the most
+recently used device, including adjustment mode. Gamepad labels describe physical
+positions without assuming a controller brand. Studio enables navigation and
+changes its footer hints as devices are used.
+
+## Forms and validation
+
+Form fields keep drafts separate from applied values. Built-in `Required`,
+`NumberRange` and `IntegerRange` validators can be combined with custom
+`TextValidator` functions. Number bounds are inclusive; numeric rules allow empty
+text unless combined with `Required`. Numeric whitespace is accepted without
+changing the stored string. Validators must be pure and run on the UI goroutine.
+
+```go
+name := ui.NewFormField("name", "Name", "Garden", eui.Required)
+count := ui.NewFormField("count", "Particles", "48",
+    eui.Required, eui.IntegerRange(1, 200))
+form := ui.NewForm(name, count)
+win.AddItem(form.View())
+
+apply := ui.NewActionButton("Apply", func() {
+    if err := form.Apply(); err != nil { return }
+    values := form.Values() // a copy; update your model here
+    _ = values
+    win.Close()
+})
+cancel := ui.NewActionButton("Cancel", win.Close)
+win.DefaultButton, win.CancelButton = apply, cancel
+win.OnClose = form.Cancel
+win.AddItem(ui.NewRow(cancel, apply))
+win.MarkOpenModal()
+```
+
+`Apply` validates every field before replacing the applied snapshot. Failure
+leaves applied values unchanged, reveals inline errors, and focuses the first
+available invalid field. `FormValidationError.Fields` contains errors by name.
+An unfinished IME composition prevents Apply and retains editing focus. Errors
+update on committed typing, paste, undo/redo, `ReplaceText`, and `UpdateText` after
+validation has first been requested. `Validate` reveals errors without applying.
+Disabled/hidden fields still validate; write optional rules for conditional data.
+
+`Cancel` silently restores the last applied values and discards preedit,
+undo/redo, and error messages. `Values`, `Draft`, `Errors`, and `Fields` return
+copies; `Dirty` includes pending composition. Values include logical password
+text. Keep the field's default private `TextPtr` to preserve draft isolation.
+Use `Input()` to configure a field and `ErrorLabel()` to style its wrapped error
+label. Direct `Text` assignments require explicit validation. Studio's **Forms**
+tab demonstrates a complete scene settings dialog.
+
 ## Testing interactions and replay
 
 `SetInputSource` accepts a function returning one `InputFrame` per `Update`.
@@ -298,8 +391,10 @@ EUI_INTERACTION_CAPTURE=/tmp/replay.png CGO_ENABLED=0 xvfb-run -a \
   go test -run '^TestRenderInteractionReplay$' .
 ```
 
-Linux CI includes pixel regressions; Windows and macOS jobs run the suite, vet,
-build, and a native Studio editor smoke render, retaining its PNG as an artifact.
+The workflow is configured for Linux pixel regressions and Windows/macOS tests,
+vet, build, and a native Studio editor smoke render. Hosted Actions is currently
+unavailable because of account billing/spending limits; local test results and
+platform validation limits are recorded in [the follow-up plan](docs/followup-plan.md).
 
 ## Event delivery
 
@@ -433,8 +528,11 @@ preparation, rather than presented FPS. See [the measurements and remaining
 limits](docs/performance.md) for the workload and recorded before/after results.
 
 Editor lookups cache document rune counts, caret lookup uses the sorted visual
-rows, and paints visit only viewport rows. Width-only reflow reuses parsed
-physical lines; cold document changes still rebuild layout. Plain text uses a
+rows, and paints visit only viewport rows. Local edits use a UTF-8 gap buffer
+and reuse unchanged paragraphs' measurements and grapheme boundaries. Wrapping
+reuses exact line-break partitions across compatible widths. Cold loads and
+font changes still parse the full document; publishing `Text` and assembling
+visual rows still scale with document size. Plain text uses a
 bounded raster cache with reusable backing allocations: at most 8 MiB of active
 allocations, 256 entries, and a separate 1 MiB idle reserve. Generic flow lists
 still retain and traverse every item. Keep application history bounded; measure
@@ -489,6 +587,46 @@ and report only commits. Install a font covering the entered language with
 preedit/commit/cancel/focus transfer have been verified through an isolated IBus
 test engine. Windows and macOS adapters compile and have CI coverage, but real
 language-IME sessions on those systems still need validation.
+
+## Modal dialogs
+
+`ui.ShowModal` opens a temporary dialog that blocks pointer, touch, wheel,
+keyboard, and window-cycle input to other windows in the same context. Other
+contexts keep their own routing. `ui.ModalWindow()` exposes the active modal so
+the host can reserve game shortcuts and world input as well.
+
+```go
+ui.ShowModal("Discard changes?", "The current draft has unsaved edits.", []eui.PopupButton{
+    {Text: "Keep editing", Cancel: true},
+    {Text: "Discard", Default: true, Action: discardDraft},
+})
+```
+
+For a custom dialog, build an ordinary window and call `win.MarkOpenModal()`.
+The top modal owns Tab/Shift+Tab and F6 navigation. OnOpen can choose focus;
+otherwise the first available control is focused. Popup dialogs focus their
+explicit default button when there is no editable/custom control ahead of it.
+Enter activates the focused button or the window's DefaultButton. IME-owned
+Enter remains a composition commit. Escape first belongs to IME, menus,
+dropdowns and search; then it activates CancelButton, or closes a Closable
+modal. The close icon uses a configured cancel action too. A disabled cancel
+action is not bypassed. BeforeClose can veto closing.
+
+Modals nest. Closing/removing one restores the previous available window,
+control, editor selection and search editing without replacing text or undo
+history. A hidden/disabled/detached return target is not revived. Removing a
+parent before its child carries the parent's return path forward. Reopening an
+existing parent does not raise it above its nested child. OnClose can open a
+replacement dialog; the replacement keeps input ownership.
+
+Input must return to neutral after a change of modal scope. This prevents the
+opening Enter or a held closing press from reaching another dialog or the
+exposed background. Captures and preedit are cancelled without synthetic
+activation/release events. Background model updates and repainting continue.
+`ui.ModalBackdrop` controls dimming; zero alpha disables the visual backdrop.
+`ShowPopup` remains a separate nonmodal convenience. Color pickers opened from a
+modal join its stack. Popup button actions run before Close; use a custom window
+when application validation needs its own submission policy.
 
 ## Keyboard navigation
 
@@ -611,7 +749,7 @@ instance with `ui.SetFontSource` and `ui.SetBoldFontSource`.
 - Each `Context` owns its UI state. Use it on the Ebitengine/game goroutine and dispose it when finished.
 - `Close` hides ordinary windows for reuse; `RemoveWindow` retires them. Popup and
   color-picker windows remove themselves on close.
-- Popups are floating dialogs; they do not block interaction with other windows.
+- `ShowPopup` opens a floating dialog; `ShowModal` blocks other windows in its context.
 - `NewTextWindow` supplies a scrolling text view and optional editable display.
   Use `NewInput` for a standalone input control. Application text-window editing,
   URL actions, and annotation policies are supplied by your own callbacks.

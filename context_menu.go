@@ -35,7 +35,6 @@ func (ctx *Context) showContextMenu(options []string, icons []*ebiten.Image, x, 
 	menu := new(itemData)
 	*menu = ctx.currentTheme.Dropdown
 	menu.ctx = ctx
-	ctx.registerItem(menu)
 	menu.Options = append([]string(nil), options...)
 	menu.OptionImages = append([]*ebiten.Image(nil), icons...)
 	menu.SmoothImage = len(icons) > 0
@@ -43,6 +42,8 @@ func (ctx *Context) showContextMenu(options []string, icons []*ebiten.Image, x, 
 	menu.HoverIndex = -1
 	menu.OnSelect = onSelect
 	menu.Handler = newHandler()
+	menu.modalOwner = ctx.modalWindow()
+	ctx.registerItem(menu)
 	menu.ParentWindow = nil
 	menu.contextMenu = true
 	// Use same option height as dropdown (menu.Size.Y). Width is computed below.

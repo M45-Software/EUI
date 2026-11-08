@@ -133,6 +133,9 @@ func (ctx *Context) Draw(screen *ebiten.Image) {
 		}
 	}()
 
+	ctx.syncModals()
+	modalSnapshot := append([]modalEntry(nil), ctx.modals...)
+
 	ctx.renderNow = ctx.uiNow()
 	defer func() { ctx.renderNow = time.Time{} }()
 
@@ -162,20 +165,33 @@ func (ctx *Context) Draw(screen *ebiten.Image) {
 	// panes, then draw standalone utility windows so they remain ordinary
 	// floating windows above the workspace.
 	for _, win := range ctx.windows {
-		if win.Docked {
+		if win.Docked && !win.IsModal() {
 			drawWindow(win)
 		}
 	}
 	ctx.drawTileDividers(screen)
 	for _, win := range ctx.windows {
-		if !win.Docked {
+		if !win.Docked && !win.IsModal() {
 			drawWindow(win)
 		}
 	}
 
 	screenClip := rect{X0: 0, Y0: 0, X1: float32(ctx.screenWidth), Y1: float32(ctx.screenHeight)}
-	for _, dd := range dropdowns {
-		ctx.drawDropdownOptions(dd.item, dd.offset, screenClip, screen)
+	drawnDropdowns := 0
+	drawLayerDropdowns := func() {
+		for _, dd := range dropdowns[drawnDropdowns:] {
+			ctx.drawDropdownOptions(dd.item, dd.offset, screenClip, screen)
+		}
+		drawnDropdowns = len(dropdowns)
+	}
+	drawLayerDropdowns()
+	for _, entry := range modalSnapshot {
+		if !entry.window.Open {
+			continue
+		}
+		ctx.drawModalBackdrop(screen)
+		drawWindow(entry.window)
+		drawLayerDropdowns()
 	}
 
 	// Draw any active context menus as overlays using the same dropdown menu
@@ -183,7 +199,7 @@ func (ctx *Context) Draw(screen *ebiten.Image) {
 	// the item's DrawRect X0/Y0.
 	if len(ctx.contextMenus) > 0 {
 		for _, cm := range ctx.contextMenus {
-			if cm == nil || !cm.Open {
+			if cm == nil || !cm.Open || cm.modalOwner != ctx.modalWindow() {
 				continue
 			}
 			off := point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0}

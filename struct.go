@@ -25,7 +25,8 @@ type SliderRange struct {
 }
 
 type windowData struct {
-	ctx *Context
+	closing bool
+	ctx     *Context
 
 	keyboardOrder uint64
 	Title         string
@@ -87,6 +88,8 @@ type windowData struct {
 	Contents []*itemData
 
 	DefaultButton *itemData
+	// CancelButton handles Escape in a modal. Without one, Closable permits dismissal.
+	CancelButton *itemData
 
 	Theme *Theme
 
@@ -172,7 +175,9 @@ type windowData struct {
 }
 
 type itemData struct {
-	ctx *Context
+	formField  *FormField
+	modalOwner *windowData
+	ctx        *Context
 
 	searchOwner  *windowData
 	textLimit    int

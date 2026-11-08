@@ -15,6 +15,7 @@ import (
 
 type editTextLine struct {
 	start, length int // source rune indices, excluding the newline
+	raw           string
 	display       string
 	bytes         []int // source rune boundary -> display byte boundary (tabs expand)
 	stops         []int // grapheme boundaries in the source line
@@ -29,6 +30,7 @@ type editTextLayout struct {
 	logical           []editTextLine // unwrapped rows, shared across width-only reflows
 	lineHeight, width float32
 	wrapWidth         float32
+	wraps             []editLineWrapCache
 }
 
 func (line editTextLine) advance(pos int, face text.Face) float32 {
@@ -70,11 +72,56 @@ func (item *itemData) editLayout() *editTextLayout {
 	layout := &editTextLayout{value: value, face: face, lineHeight: lineHeight, wrapWidth: wrapWidth}
 	if s.layout != nil && s.layout.value == value && s.layout.face == face {
 		layout.logical = s.layout.logical
+		layout.wraps = s.layout.wraps
 	} else {
-		layout.logical = make([]editTextLine, 0, strings.Count(value, "\n")+1)
+		lineCount := strings.Count(value, "\n") + 1
+		layout.logical = make([]editTextLine, 0, lineCount)
+		previous := s.layout
+		reusable := previous != nil && previous.face == face && !item.HideText
+		if wrapWidth > 0 || reusable && len(previous.wraps) > 0 {
+			layout.wraps = make([]editLineWrapCache, lineCount)
+		}
 		start := 0
+		var oldByRaw map[string]int
+		misses := 0
 		for raw := range strings.SplitSeq(value, "\n") {
-			line := editTextLine{start: start, length: utf8.RuneCountInString(raw), stops: graphemeStops(raw)}
+			index := len(layout.logical)
+			oldIndex := index
+			if reusable {
+				matches := func(i int) bool { return i >= 0 && i < len(previous.logical) && previous.logical[i].raw == raw }
+				if !matches(oldIndex) {
+					oldIndex = index + len(previous.logical) - lineCount
+				}
+				if !matches(oldIndex) {
+					misses++
+					// Multiple edits can shift an unchanged middle block by a
+					// different amount than either the prefix or suffix. Build
+					// a fallback index only when the cheap matches are insufficient.
+					if misses > 1 && oldByRaw == nil {
+						oldByRaw = make(map[string]int, len(previous.logical))
+						for i, line := range previous.logical {
+							oldByRaw[line.raw] = i
+						}
+					}
+					if i, found := oldByRaw[raw]; found {
+						oldIndex = i
+					}
+				}
+				if matches(oldIndex) {
+					line := previous.logical[oldIndex]
+					// Rebind source slices to the current snapshot. Otherwise editing
+					// different lines could retain one whole old document per line.
+					line.raw = raw
+					line.start = start
+					layout.logical = append(layout.logical, line)
+					if len(layout.wraps) > 0 && oldIndex < len(previous.wraps) {
+						layout.wraps[index] = previous.wraps[oldIndex]
+					}
+					start += line.length + 1
+					continue
+				}
+			}
+			line := editTextLine{raw: raw, start: start, length: utf8.RuneCountInString(raw), stops: graphemeStops(raw)}
 			line.bytes = make([]int, 1, line.length+1)
 			var display strings.Builder
 			display.Grow(len(raw) + strings.Count(raw, "\t")*3)
@@ -109,11 +156,21 @@ func (item *itemData) editLayout() *editTextLayout {
 	if wrapWidth == 0 {
 		layout.lines = layout.logical
 	} else {
-		layout.lines = make([]editTextLine, 0, len(layout.logical))
-		i := 0
-		for raw := range strings.SplitSeq(value, "\n") {
-			layout.lines = appendWrappedEditLine(layout.lines, layout.logical[i], raw, face, wrapWidth)
-			i++
+		capacity := len(layout.logical)
+		if previous := s.layout; previous != nil && previous.wrapWidth > 0 {
+			estimate := len(previous.lines)
+			if previous.wrapWidth != wrapWidth {
+				estimate = int(float64(estimate)*float64(previous.wrapWidth)/float64(wrapWidth)) + len(layout.logical)
+			}
+			last := layout.logical[len(layout.logical)-1]
+			capacity = max(capacity, min(estimate, last.start+last.length+1))
+		}
+		layout.lines = make([]editTextLine, 0, capacity)
+		if len(layout.wraps) != len(layout.logical) {
+			layout.wraps = make([]editLineWrapCache, len(layout.logical))
+		}
+		for i, line := range layout.logical {
+			layout.lines = layout.wraps[i].appendRows(layout.lines, line, face, wrapWidth)
 		}
 	}
 	for _, line := range layout.lines {

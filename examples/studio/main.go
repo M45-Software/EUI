@@ -247,6 +247,7 @@ func (s *studio) build() error {
 	}
 	s.ui.AutoHiDPI = false
 	s.ui.SetScreenSize(width, height)
+	s.ui.SetGamepadNavigation(true)
 	s.tint = s.ui.AccentColor()
 	s.viewport = s.ui.NewWindow()
 	s.viewport.TitleHeight = 0
@@ -361,7 +362,8 @@ func (s *studio) build() error {
 		}
 	}
 	controls.AddItem(slider)
-	controls.AddItem(s.dropdown([]string{"12 particles", "24 particles", "48 particles", "72 particles"}, "48 particles", 438, func(v string) { fmt.Sscanf(v, "%d particles", &s.count); s.log(v + " in motion") }))
+	countPicker := s.dropdown([]string{"12 particles", "24 particles", "48 particles", "72 particles"}, "48 particles", 438, func(v string) { fmt.Sscanf(v, "%d particles", &s.count); s.log(v + " in motion") })
+	controls.AddItem(countPicker)
 	opts := s.ui.NewRow()
 	opts.FillWidth = true
 	opts.Gap = 8
@@ -383,7 +385,7 @@ func (s *studio) build() error {
 	})
 	reset := s.button("Reset orbit", 140, func() { s.phase = 0; s.log("Orbit returned to its starting position") })
 	info := s.button("Scene info", 140, func() {
-		s.ui.ShowPopup("Your scene", fmt.Sprintf("%s\n\n%d particles at %.2fx speed.\n\nThis is a standard EUI dialog. Its text can be selected and copied.", s.sceneName, s.count, s.speed), []eui.PopupButton{{Text: "Back to studio"}})
+		s.ui.ShowModal("Your scene", fmt.Sprintf("%s\n\n%d particles at %.2fx speed.\n\nThis modal blocks the Studio until dismissed. Its text can be selected and copied.", s.sceneName, s.count, s.speed), []eui.PopupButton{{Text: "Back to studio", Default: true, Cancel: true}})
 	})
 	s.actions = s.ui.NewRow(play, reset, info)
 	s.actions.FillWidth = true
@@ -456,7 +458,13 @@ func (s *studio) build() error {
 	s.editorTools.Gap = 6
 	editorTab.AddItem(s.editorTools)
 	editorTab.AddItem(s.editor)
-	tabs.Tabs = []*eui.ItemData{activity, editorTab, recipe, about}
+	formsTab := s.ui.NewColumn(
+		s.ui.NewWrappedLabel("Edit a draft, then Apply or Cancel. Required fields and number ranges show inline errors. The scene changes only after every field is valid.", 400),
+		s.button("Edit scene settings", 210, func() { s.openSceneSettings(slider, countPicker) }),
+	)
+	formsTab.Name, formsTab.Gap = "Forms", 12
+	formsTab.FillWidth = true
+	tabs.Tabs = []*eui.ItemData{activity, editorTab, formsTab, recipe, about}
 	s.notebookTabs = tabs
 	for i, tab := range tabs.Tabs {
 		if tab.Name == s.initialTab {
@@ -540,7 +548,16 @@ func (s *studio) Draw(screen *ebiten.Image) {
 	s.ui.Draw(screen)
 	s.writeText(screen, "EUI / NATIVE GO UI", 24, float64(h-30), 10, accent, true)
 	if w >= 760 {
-		s.writeText(screen, "Tab selects controls. Enter activates. Scroll for more.", 220, float64(h-30), 11, muted, false)
+		hint := "Tab selects controls. Enter activates. Scroll for more."
+		prompts := s.ui.NavigationPrompts()
+		if prompts[0].Label == "D-pad / left stick" {
+			confirm := "Confirm"
+			if prompts[0].Action == "Adjust" {
+				confirm = "Finish"
+			}
+			hint = "D-pad / stick: " + prompts[0].Action + "   Bottom: " + confirm + "   Right: Back"
+		}
+		s.writeText(screen, hint, 220, float64(h-30), 11, muted, false)
 	}
 	if w >= 1140 {
 		s.writeText(screen, fmt.Sprintf("%02d PARTICLES / %.2fx SPEED", s.count, s.speed), float64(w-300), float64(h-30), 11, muted, false)
@@ -628,7 +645,7 @@ func main() {
 	style := flag.String("style", "Default", "initial widget style")
 	windowWidth := flag.Int("width", width, "initial window width")
 	windowHeight := flag.Int("height", height, "initial window height")
-	initialTab := flag.String("tab", "Activity", "initial notebook tab: Activity, Editor, Quick start, About")
+	initialTab := flag.String("tab", "Activity", "initial notebook tab: Activity, Editor, Forms, Quick start, About")
 	flag.Parse()
 	s := &studio{speed: 0.75, count: 48, playing: true, grid: true, trails: true, sceneName: "Orbit garden / study 001", palette: *palette, style: *style, screenshot: *screenshot, initialTab: *initialTab}
 	if err := s.build(); err != nil {

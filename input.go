@@ -21,6 +21,7 @@ func (ctx *Context) Update() (err error) {
 		if win != nil {
 			ctx.requireWindow(win)
 			ctx.requireItem(win.DefaultButton)
+			ctx.requireItem(win.CancelButton)
 		}
 	}
 
@@ -42,6 +43,29 @@ func (ctx *Context) Update() (err error) {
 		return err
 	}
 	ctx.updateNow = ctx.sampledInput.now
+	ctx.syncModals()
+	ctx.updateGamepadState()
+	modalEpoch := ctx.modalEpoch
+	if ctx.modalAwaitNeutral {
+		ctx.pointerPressHandled = ctx.modalPointerHeld()
+		ctx.ShiftPressed, ctx.CtrlPressed = false, false
+		for _, win := range ctx.windows {
+			if win.Open {
+				clearExpiredClicksAt(win.Contents, ctx.updateNow)
+			}
+		}
+		if ctx.focusedItem != nil && itemHandlesTextEditing(ctx.focusedItem) {
+			ctx.focusedItem.updateCaretBlink(ctx.updateNow)
+		}
+		if ctx.modalInputNeutral() {
+			ctx.modalAwaitNeutral = false
+		}
+		return nil
+	}
+	if modal := ctx.modalWindow(); modal != nil {
+		ctx.activeWindow = modal
+	}
+
 	for _, it := range []*itemData{ctx.focusedItem, ctx.activeItem, ctx.hoveredItem, ctx.dragFlow} {
 		if it != nil && (it.isInvisible() || it.ParentWindow != nil && !it.ParentWindow.Open) {
 			it.clearHiddenState()
@@ -81,6 +105,20 @@ func (ctx *Context) Update() (err error) {
 
 	click := ctx.pointerJustPressed()
 	midClick := ctx.middleClickMove && ctx.mouseJustPressed(ebiten.MouseButtonMiddle)
+	if modal := ctx.modalWindow(); modal != nil {
+		if click || midClick {
+			ctx.pointerPressHandled = true
+		}
+		if (click || midClick) && windowAtPointer(orderedWindows, mpos) == nil && !ctx.dropdownOpenContains(modal.Contents, mpos) && !ctx.contextMenuContainsAnywhere(mpos) {
+			ctx.CloseContextMenus()
+			ctx.closeAllDropdowns()
+			if ctx.modalFrameChanged(modalEpoch) {
+				return nil
+			}
+			click, midClick = false, false
+		}
+	}
+
 	if mx != int(ctx.mposOld.X) || my != int(ctx.mposOld.Y) || click {
 		if ctx.focusedItem != nil {
 			ctx.focusedItem.keyboardMenu = false
@@ -112,10 +150,13 @@ func (ctx *Context) Update() (err error) {
 	midClickDrag := midClickTime > 1
 
 	if (!ctx.pointerPressed() || ctx.sampledInput.primaryEnded) && !midPressed {
-		if ctx.activeItem != nil {
-			ctx.activeItem.emitSliderReleased()
-			if ctx.activeItem.textEdit != nil {
-				ctx.activeItem.textEdit.scrollDrag = PART_NONE
+		if item := ctx.activeItem; item != nil {
+			item.emitSliderReleased()
+			if ctx.modalFrameChanged(modalEpoch) {
+				return nil
+			}
+			if item.textEdit != nil {
+				item.textEdit.scrollDrag = PART_NONE
 			}
 		}
 		if ctx.selectedTextItem != nil && ctx.selectedTextItem.selecting {
@@ -162,7 +203,10 @@ func (ctx *Context) Update() (err error) {
 
 	//Check all windows
 	for _, win := range orderedWindows {
-		if !win.Open {
+		if ctx.modalFrameChanged(modalEpoch) {
+			return nil
+		}
+		if !win.Open || !ctx.modalAllows(win) {
 			continue
 		}
 
@@ -206,7 +250,11 @@ func (ctx *Context) Update() (err error) {
 			if click && ctx.dragPart == PART_NONE && ctx.downWin == win {
 				ctx.pointerPressHandled = true
 				if part == PART_CLOSE {
-					win.Close()
+					if win.IsModal() && win.CancelButton != nil {
+						ctx.activateControl(win.CancelButton)
+					} else {
+						win.Close()
+					}
 					break
 				}
 				if part == PART_MAXIMIZE {
@@ -299,6 +347,9 @@ func (ctx *Context) Update() (err error) {
 		if !handled {
 			handled = win.clickWindowItems(mpos, click)
 		}
+		if ctx.modalFrameChanged(modalEpoch) {
+			return nil
+		}
 		if click && handled {
 			ctx.pointerPressHandled = true
 		}
@@ -323,6 +374,9 @@ func (ctx *Context) Update() (err error) {
 		}
 	}
 
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
+	}
 	// A slider owns its press until release, including outside its hit rectangle.
 	// Process it once per tick, including the initial press, after hit testing has
 	// established capture. This also makes short track clicks change the value.
@@ -352,6 +406,9 @@ func (ctx *Context) Update() (err error) {
 		}
 	}
 
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
+	}
 	if ctx.hoveredItem != nil && ctx.hoveredItem.ItemType == ITEM_TEXT && ctx.hoveredItem.OnURLClick != nil && c == ebiten.CursorShapeDefault {
 		if ctx.hoveredItem.urlAtChar(ctx.hoveredItem.cursorIndexAt(mpos)) != "" {
 			c = ebiten.CursorShapePointer
@@ -411,6 +468,13 @@ func (ctx *Context) Update() (err error) {
 		}
 	}
 
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
+	}
+	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyEscape) && ctx.modalWindow() != nil && ctx.activeContextMenu() == nil && ctx.activeSearch == nil && !ctx.hasOpenDropdown() {
+		ctx.cancelModal()
+		return nil
+	}
 	textKeyboardHandled := imeHandled
 	if keyboardAllowed && ctx.focusedItem != nil && ctx.activeSearch == nil && ctx.activeContextMenu() == nil && itemHandlesTextEditing(ctx.focusedItem) {
 		textKeyboardHandled = ctx.focusedItem.updateTextEditing(chars, mods, shiftPressed)
@@ -419,6 +483,9 @@ func (ctx *Context) Update() (err error) {
 		target.updateCaretBlink(ctx.updateNow)
 	}
 
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
+	}
 	if !keyboardAllowed {
 		// IME-owned keys and host capture must not activate UI shortcuts.
 	} else if ctx.activeContextMenu() != nil {
@@ -450,8 +517,15 @@ func (ctx *Context) Update() (err error) {
 			ctx.tabFocus(shiftPressed)
 		}
 	}
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
+	}
 	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyEscape) {
 		ctx.closeAllDropdowns()
+	}
+	ctx.pollGamepad()
+	if ctx.modalFrameChanged(modalEpoch) {
+		return nil
 	}
 	if ctx.keyboardInputCaptured {
 		ctx.finishKeyboardSlider()
@@ -461,7 +535,10 @@ func (ctx *Context) Update() (err error) {
 
 	if wheelDelta.X != 0 || wheelDelta.Y != 0 {
 		for _, win := range orderedWindows {
-			if !win.Open {
+			if ctx.modalFrameChanged(modalEpoch) {
+				return nil
+			}
+			if !win.Open || !ctx.modalAllows(win) {
 				continue
 			}
 			// Give context menus first chance at scroll.
@@ -522,6 +599,10 @@ func (item *itemData) emitSliderReleased() {
 }
 
 func (ctx *Context) windowsFrontToBack() []*windowData {
+	if modal := ctx.modalWindow(); modal != nil {
+		ctx.inputWindowOrder = append(ctx.inputWindowOrder[:0], modal)
+		return ctx.inputWindowOrder
+	}
 	ctx.inputWindowOrder = ctx.inputWindowOrder[:0]
 	for i := len(ctx.windows) - 1; i >= 0; i-- {
 		if !ctx.windows[i].Docked {

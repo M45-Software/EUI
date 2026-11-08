@@ -189,7 +189,11 @@ func (ctx *Context) ShowColorPicker(title string, initial Color, apply func(Colo
 	wheel.SetWheelColor(initial)
 	win.AddItem(root)
 	win.AddWindow(false)
-	win.MarkOpen()
+	if ctx.modalWindow() != nil {
+		win.MarkOpenModal()
+	} else {
+		win.MarkOpen()
+	}
 	win.DefaultButton = applyButton
 	_ = win.SetPos(Point{X: 80, Y: 80})
 	return win

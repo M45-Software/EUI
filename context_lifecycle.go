@@ -197,6 +197,7 @@ func (ctx *Context) disposeNow() {
 		ctx.whiteImage.Deallocate()
 		ctx.whiteImage = nil
 	}
+	ctx.modals = nil
 	ctx.windows = nil
 	ctx.contextMenus = nil
 	ctx.shadowMasks = nil
@@ -222,6 +223,11 @@ func (ctx *Context) disposeNow() {
 	ctx.nativeTouchIDs = nil
 	ctx.nativeTouches = nil
 	ctx.nativeChars = nil
+	ctx.gamepad = gamepadNavigation{}
+	ctx.nativeGamepadIDs = nil
+	ctx.nativeGamepadFrames = nil
+	ctx.nativeGamepadButtons = nil
+	ctx.GamepadCancelHandler = nil
 	ctx.tileDividers = nil
 	ctx.mplusFaceSource = nil
 	ctx.mplusBoldFaceSource = nil

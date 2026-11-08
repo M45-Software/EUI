@@ -16,6 +16,18 @@ import (
 
 // Context owns one independent UI. It must not be copied.
 type Context struct {
+	gamepad              gamepadNavigation
+	nativeGamepadIDs     []ebiten.GamepadID
+	nativeGamepadFrames  []GamepadInput
+	nativeGamepadButtons [][]ebiten.StandardGamepadButton
+	// GamepadCancelHandler receives Back when no menu, editor adjustment, search
+	// or modal consumes it. It runs synchronously on the UI goroutine.
+	GamepadCancelHandler func()
+	modals               []modalEntry
+	modalEpoch           uint64
+	modalAwaitNeutral    bool
+	// ModalBackdrop dims content behind each modal; zero alpha disables dimming.
+	ModalBackdrop                  Color
 	self                           *Context
 	disposed                       bool
 	ownedItems                     map[weak.Pointer[itemData]]struct{}
@@ -151,6 +163,7 @@ type Context struct {
 func NewContext() (*Context, error) {
 	ctx := &Context{}
 	ctx.self = ctx
+	ctx.ModalBackdrop = Color{A: 112}
 	ctx.inputEnabled = true
 	ctx.isWasm = runtime.GOOS == "js" && runtime.GOARCH == "wasm"
 	ctx.faceCache = map[float64]*text.GoTextFace{}

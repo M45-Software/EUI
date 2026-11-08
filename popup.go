@@ -13,18 +13,42 @@ type PopupButton struct {
 	Color      *Color
 	HoverColor *Color
 	Action     func()
+	// Default selects the Enter action; Cancel selects Escape/close in a modal.
+	Default, Cancel bool
 }
 
-// ShowPopup opens a floating dialog with extra items, a message, and buttons.
-// It does not block input to other windows. Button actions run before close;
-// closing removes the temporary window. Call Init or supply a font first.
+// ShowPopup opens a floating, nonmodal dialog. Actions run before close;
+// closing removes the temporary window. Use ShowModal to block other windows.
 func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
 	ctx.mustAlive()
+	return ctx.showPopup(title, message, buttons, false, extras...)
+}
 
+// ShowModal opens a modal popup. Explicit Default/Cancel button roles determine
+// Enter/Escape actions. The first button is the default if none is designated;
+// without a cancel action, Escape closes a Closable dialog.
+func (ctx *Context) ShowModal(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
+	ctx.mustAlive()
+	return ctx.showPopup(title, message, buttons, true, extras...)
+}
+func (ctx *Context) showPopup(title, message string, buttons []PopupButton, modal bool, extras ...*ItemData) *WindowData {
+	defaults, cancels := 0, 0
+	for _, button := range buttons {
+		if button.Default {
+			defaults++
+		}
+		if button.Cancel {
+			cancels++
+		}
+	}
+	if defaults > 1 || cancels > 1 {
+		panic("eui: popup permits one default and one cancel button")
+	}
+	ctx.bindItems(extras)
 	win := ctx.NewWindow()
 	win.Title = title
 	win.OnClose = win.RemoveWindow
-	win.Closable = false
+	win.Closable = modal
 	win.Resizable = false
 	win.AutoSize = true
 	win.Movable = true
@@ -86,7 +110,7 @@ func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extr
 
 	// Buttons row
 	btnRow := ctx.NewRow()
-	for _, b := range buttons {
+	for index, b := range buttons {
 		btn, ev := ctx.NewButton()
 		btn.Text = b.Text
 		btn.Size = Point{X: 120, Y: 24}
@@ -101,6 +125,12 @@ func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extr
 		}
 		if b.Color != nil || b.HoverColor != nil {
 			btn.SetButtonColors(btn.Color, btn.HoverColor)
+		}
+		if b.Default || defaults == 0 && index == 0 {
+			win.DefaultButton = btn
+		}
+		if b.Cancel {
+			win.CancelButton = btn
 		}
 		action := b.Action
 		ev.Handle = func(ev UIEvent) {
@@ -117,6 +147,13 @@ func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extr
 
 	win.AddItem(flow)
 	win.AddWindow(false)
-	win.MarkOpen()
+	if modal {
+		win.MarkOpenModal()
+		if ctx.modalWindow() == win && win.DefaultButton != nil && (ctx.focusedItem == nil || ctx.focusedItem.Parent == btnRow) {
+			ctx.Focus(win.DefaultButton)
+		}
+	} else {
+		win.MarkOpen()
+	}
 	return win
 }
