@@ -17,35 +17,35 @@ type dropdownLayout struct {
 }
 
 // Option rows exclude the dropdown's field label.
-func dropdownOptionHeight(item *itemData) float32 {
+func (ctx *Context) dropdownOptionHeight(item *itemData) float32 {
 	if item.Open && item.dropdownLayout != nil {
 		return item.dropdownLayout.rowHeight
 	}
 	height := item.GetSize().Y
 	if item.Label != "" {
-		height -= item.FontSize*uiScale + 2 + currentStyle.TextPadding*uiScale
+		height -= item.FontSize*ctx.uiScale + 2 + ctx.currentStyle.TextPadding*ctx.uiScale
 	}
 	return max(1, height)
 }
 
 // Drawing and pointer handling must use the same bounds during a preview.
-func dropdownOpenRect(item *itemData, offset point) (rect, int) {
-	layout := dropdownMenuLayout(item, offset)
+func (ctx *Context) dropdownOpenRect(item *itemData, offset point) (rect, int) {
+	layout := ctx.dropdownMenuLayout(item, offset)
 	return layout.bounds, layout.visible
 }
 
-func dropdownMenuLayout(item *itemData, offset point) dropdownLayout {
+func (ctx *Context) dropdownMenuLayout(item *itemData, offset point) dropdownLayout {
 	if item.Open && item.dropdownLayout != nil {
 		return *item.dropdownLayout
 	}
 	maxSize := item.GetSize()
-	optionH := dropdownOptionHeight(item)
+	optionH := ctx.dropdownOptionHeight(item)
 	visible := item.MaxVisible
 	if visible <= 0 {
 		visible = len(item.Options)
 	}
 	visible = min(visible, len(item.Options))
-	maxVisible := max(1, int((float32(screenHeight)-optionH*dropdownOverlayReserve*2)/optionH))
+	maxVisible := max(1, int((float32(ctx.screenHeight)-optionH*dropdownOverlayReserve*2)/optionH))
 	visible = min(visible, maxVisible)
 
 	startY := offset.Y
@@ -53,7 +53,7 @@ func dropdownMenuLayout(item *itemData, offset point) dropdownLayout {
 		startY += maxSize.Y
 	}
 	r := rect{X0: offset.X, Y0: startY, X1: offset.X + maxSize.X, Y1: startY + optionH*float32(visible)}
-	bottomLimit := float32(screenHeight) - optionH*dropdownOverlayReserve
+	bottomLimit := float32(ctx.screenHeight) - optionH*dropdownOverlayReserve
 	if r.Y1 > bottomLimit {
 		diff := r.Y1 - bottomLimit
 		r.Y0 -= diff
@@ -67,10 +67,10 @@ func dropdownMenuLayout(item *itemData, offset point) dropdownLayout {
 	}
 	layout := dropdownLayout{
 		bounds: r, visible: visible, rowHeight: optionH,
-		fontSize: item.FontSize*uiScale + 2, face: item.Face,
-		textInset: item.BorderPad + item.Padding + currentStyle.TextPadding*uiScale,
-		iconSize:  max(0, optionH-8*uiScale), iconGap: 4 * uiScale,
-		scrollbarWidth: currentStyle.BorderPad.Slider * 2,
+		fontSize: item.FontSize*ctx.uiScale + 2, face: item.Face,
+		textInset: item.BorderPad + item.Padding + ctx.currentStyle.TextPadding*ctx.uiScale,
+		iconSize:  max(0, optionH-8*ctx.uiScale), iconGap: 4 * ctx.uiScale,
+		scrollbarWidth: ctx.currentStyle.BorderPad.Slider * 2,
 	}
 	if item.Open && item.OnHover != nil {
 		item.dropdownLayout = &layout

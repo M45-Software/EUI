@@ -25,9 +25,12 @@ type SliderRange struct {
 }
 
 type windowData struct {
-	Title    string
-	Position point
-	Size     point
+	ctx *Context
+
+	keyboardOrder uint64
+	Title         string
+	Position      point
+	Size          point
 
 	zone *windowZone
 
@@ -123,7 +126,8 @@ type windowData struct {
 	RenderCount int
 
 	// SearchText holds the current text in the window's search box.
-	SearchText string
+	SearchText  string
+	searchInput *itemData
 
 	// HasIndeterminate reports whether any contained progress bar is
 	// currently indeterminate.
@@ -168,6 +172,10 @@ type windowData struct {
 }
 
 type itemData struct {
+	ctx *Context
+
+	searchOwner  *windowData
+	textLimit    int
 	Parent       *itemData
 	ParentWindow *windowData
 	// Name is used when the item is part of a tabbed flow
@@ -179,13 +187,32 @@ type itemData struct {
 	tooltipW   float32 // cached tooltip text width
 	tooltipH   float32 // cached tooltip text height
 	Position   point
-	Size       point
-	Alignment  alignType
-	PinTo      pinType
-	FontSize   float32
-	Face       text.Face
-	LineSpace  float32 //Multiplier, 1.0 = no gap between lines
-	ItemType   itemTypeData
+	// Size is the preferred logical size; zero uses measured content.
+	Size point
+	// MinSize and MaxSize constrain the complete layout footprint, including
+	// field labels. Zero means no bound. Minimum wins if bounds conflict.
+	MinSize, MaxSize Point
+	// FillWidth/FillHeight consume available space. On a row's main axis
+	// (column's height), fill children share space equally within their bounds.
+	FillWidth, FillHeight bool
+	// ContentPadding is logical space inside the flow around its children.
+	ContentPadding Insets
+	// Gap separates visible flow children. MainAlign packs the group along
+	// the flow direction; CrossAlign aligns individual children across it.
+	Gap                   float32
+	MainAlign, CrossAlign LayoutAlign
+	layoutPreferred       Point
+	layoutGutter          Point
+	layoutSize            Point
+	layoutKey             itemLayoutKey
+	layoutValid           bool
+	layoutWrapWidth       float32
+	Alignment             alignType
+	PinTo                 pinType
+	FontSize              float32
+	Face                  text.Face
+	LineSpace             float32 //Multiplier, 1.0 = no gap between lines
+	ItemType              itemTypeData
 
 	Value    float32
 	MinValue float32
@@ -199,7 +226,7 @@ type itemData struct {
 
 	Hovered, Checked, Focused, Disabled bool
 	// Invisible removes the item and its descendants from drawing, input, and
-	// layout. Refresh the parent window after changing it.
+	// layout. Use SetVisible for automatic layout and input-state cleanup.
 	Invisible   bool
 	Clicked     time.Time
 	FlowType    flowType
@@ -218,6 +245,7 @@ type itemData struct {
 
 	// Preview menus retain their opening geometry until dismissed.
 	dropdownLayout *dropdownLayout
+	keyboardMenu   bool
 	contextMenu    bool // Options start at the supplied anchor, without a dropdown field.
 
 	// HeaderCount marks the number of initial options that are shown as
@@ -226,6 +254,8 @@ type itemData struct {
 	// do not trigger selection on click.
 	HeaderCount int
 
+	// OnSelect runs after Handler for a committed dropdown/context-menu choice.
+	// Hover preview ends before either selection callback runs.
 	OnSelect func(int)
 	// OnHover receives an option index, then Selected when hover ends.
 	// For dropdowns HoverIndex is -1 when the pointer leaves or the menu closes.
@@ -272,7 +302,12 @@ type itemData struct {
 	ForceTextColor    bool
 	buttonColors      *buttonColorOverride
 
-	Action        func()
+	// Action runs after Handler for button/check/radio activation and changed
+	// slider values. For changed wheel colors it follows OnColorChange (or the
+	// default accent update). It does not run for slider release or menu opening.
+	Action func()
+	// OnColorChange receives the interaction's color snapshot after Handler.
+	// Nil applies the color to the global accent instead.
 	OnColorChange func(Color)
 	// OnTextZoom handles font-size steps from shortcut +/- or shortcut-wheel
 	// in an editable text control. A nil callback keeps normal editing/scrolling.
@@ -338,8 +373,8 @@ type itemData struct {
 	// rendered.
 	DrawRect rect
 
-	// Render caches the pre-rendered image for this item when Dirty is
-	// false. Flows are never cached.
+	// Render is a UI-owned pre-rendered item cache. Dirty caches are released
+	// before the next paint. Application images belong in Image. Flows are never cached.
 	Render *ebiten.Image
 	Dirty  bool
 

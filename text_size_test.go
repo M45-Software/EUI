@@ -9,14 +9,16 @@ import (
 )
 
 func TestAutosizedTextPreservesBlankLinesAndRefreshesMetrics(t *testing.T) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	previousScale := uiScale
-	t.Cleanup(func() { uiScale = previousScale })
+	previousScale := ctx.uiScale
+	t.Cleanup(func() { ctx.uiScale = previousScale })
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
-		item := &itemData{ItemType: ITEM_TEXT, FontSize: 12, Text: "Wide text"}
+		ctx.uiScale = scale
+		item := &itemData{ctx: ctx, ItemType: ITEM_TEXT, FontSize: 12, Text: "Wide text"}
 		line := item.GetSize()
 		item.Text = "Wide text\n\n"
 		if got := item.GetSize(); got.X != line.X || got.Y != 3*line.Y {
@@ -35,20 +37,22 @@ func TestAutosizedTextPreservesBlankLinesAndRefreshesMetrics(t *testing.T) {
 }
 
 func TestUnconstrainedTextGrowsBeyondThemeDefault(t *testing.T) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	previousScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = previousScale })
+	previousScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = previousScale })
 
-	item := &itemData{
+	item := &itemData{ctx: ctx,
 		ItemType: ITEM_TEXT,
 		FontSize: 12,
 		Size:     point{X: 128, Y: 24},
 		Text:     "Incorrect password. Please try again.",
 	}
-	width, _ := text.Measure(item.Text, itemFace(item, item.FontSize*uiScale+2), 0)
+	width, _ := text.Measure(item.Text, ctx.itemFace(item, item.FontSize*ctx.uiScale+2), 0)
 	if got := item.GetSize().X; got < float32(math.Ceil(width)) {
 		t.Fatalf("unconstrained text width = %v, want at least measured width %v", got, width)
 	}
@@ -60,11 +64,13 @@ func TestUnconstrainedTextGrowsBeyondThemeDefault(t *testing.T) {
 }
 
 func TestItemFaceHandlesTypedNilFace(t *testing.T) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	item := &itemData{Face: (*text.GoTextFace)(nil)}
-	if face := itemFace(item, 14); face == nil {
+	item := &itemData{ctx: ctx, Face: (*text.GoTextFace)(nil)}
+	if face := ctx.itemFace(item, 14); face == nil {
 		t.Fatal("typed nil item face did not fall back to the font cache")
 	}
 }

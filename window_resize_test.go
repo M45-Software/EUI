@@ -5,36 +5,38 @@ import (
 	"testing"
 )
 
-func setupWindowResizeTest(t *testing.T, scale float32, noScale bool) {
+func (ctx *Context) setupWindowResizeTest(t *testing.T, scale float32, noScale bool) {
 	t.Helper()
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
-	uiScale = scale
+	ctx.uiScale = scale
 	windowScale := scale
 	if noScale {
 		windowScale = 1
 	}
-	screenWidth, screenHeight = int(600*windowScale), int(400*windowScale)
-	windows = nil
+	ctx.screenWidth, ctx.screenHeight = int(600*windowScale), int(400*windowScale)
+	ctx.windows = nil
 }
 
 func TestWindowResizeGrabAreaOwnsPointer(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, scale := range []float32{1, 1.5, 2} {
 		for _, noScale := range []bool{false, true} {
 			t.Run(fmt.Sprintf("scale=%g/noScale=%t", scale, noScale), func(t *testing.T) {
-				setupWindowResizeTest(t, scale, noScale)
-				front, back := NewWindow(), NewWindow()
+				ctx.setupWindowResizeTest(t, scale, noScale)
+				front, back := ctx.NewWindow(), ctx.NewWindow()
 				front.Open, front.Resizable, front.NoScroll, front.NoScale = true, true, true, noScale
 				front.Position, front.Size = point{100, 80}, point{200, 160}
 				back.Open, back.NoScale = true, noScale
 				back.Position, back.Size = point{}, point{600, 400}
 				ordered := []*windowData{front, back}
 				// Only the front window may cover the workspace divider below.
-				windows = []*windowData{front}
+				ctx.windows = []*windowData{front}
 				for _, tt := range []struct {
 					name string
 					pos  point
@@ -60,7 +62,7 @@ func TestWindowResizeGrabAreaOwnsPointer(t *testing.T) {
 						if windowAtPointer(ordered, p) != front {
 							t.Fatal("resize cursor area sent the press to the window underneath")
 						}
-						if !tileDividerCoveredByStandaloneWindow(p) {
+						if !ctx.tileDividerCoveredByStandaloneWindow(p) {
 							t.Fatal("resize cursor area did not block the workspace divider")
 						}
 						if windowAtPointer([]*windowData{back, front}, p) != back {
@@ -91,6 +93,8 @@ func TestWindowResizeGrabAreaOwnsPointer(t *testing.T) {
 }
 
 func TestWindowResizeStopsAtScreenEdges(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, scale := range []float32{1, 1.5, 2} {
 		for _, noScale := range []bool{false, true} {
 			for _, snapping := range []bool{false, true} {
@@ -109,22 +113,22 @@ func TestWindowResizeStopsAtScreenEdges(t *testing.T) {
 					{"bottom right", PART_BOTTOM_RIGHT, point{1000, 1000}, point{100, 80}, point{500, 320}},
 				} {
 					t.Run(fmt.Sprintf("%s/scale=%g/noScale=%t/snapping=%t", tt.name, scale, noScale, snapping), func(t *testing.T) {
-						setupWindowResizeTest(t, scale, noScale)
-						windowSnapping = snapping
-						win := NewWindow()
+						ctx.setupWindowResizeTest(t, scale, noScale)
+						ctx.windowSnapping = snapping
+						win := ctx.NewWindow()
 						win.NoScale = noScale
 						win.Position, win.Size = point{100, 80}, point{200, 160}
-						windows = []*windowData{win}
+						ctx.windows = []*windowData{win}
 						for i := 0; i < 3; i++ {
-							dragWindowResize(win, tt.part, tt.delta)
-							snapResize(win, tt.part)
+							ctx.dragWindowResize(win, tt.part, tt.delta)
+							ctx.snapResize(win, tt.part)
 							if win.Position != tt.pos || win.Size != tt.size {
 								t.Fatalf("drag %d: position=%v size=%v, want %v %v", i, win.Position, win.Size, tt.pos, tt.size)
 							}
 						}
 						// Reversing direction should shrink immediately, without accumulated overshoot.
 						before := win.Size
-						dragWindowResize(win, tt.part, point{X: -tt.delta.X / 50, Y: -tt.delta.Y / 50})
+						ctx.dragWindowResize(win, tt.part, point{X: -tt.delta.X / 50, Y: -tt.delta.Y / 50})
 						if win.Size == before {
 							t.Fatal("window did not shrink after reversing the drag")
 						}
@@ -136,40 +140,46 @@ func TestWindowResizeStopsAtScreenEdges(t *testing.T) {
 }
 
 func TestWindowResizeMinimumKeepsOppositeEdgesFixed(t *testing.T) {
-	setupWindowResizeTest(t, 1, false)
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	ctx.setupWindowResizeTest(t, 1, false)
+	win := ctx.NewWindow()
 	win.Position, win.Size = point{100, 80}, point{200, 160}
-	windows = []*windowData{win}
-	dragWindowResize(win, PART_TOP_LEFT, point{1000, 20})
+	ctx.windows = []*windowData{win}
+	ctx.dragWindowResize(win, PART_TOP_LEFT, point{1000, 20})
 	if win.Position != (point{236, 100}) || win.Size != (point{64, 140}) {
 		t.Fatalf("minimum width moved the fixed edge or blocked vertical resizing: %v %v", win.Position, win.Size)
 	}
 }
 
 func TestWindowResizeReleasesZone(t *testing.T) {
-	setupWindowResizeTest(t, 1, false)
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	ctx.setupWindowResizeTest(t, 1, false)
+	win := ctx.NewWindow()
 	win.Size = point{200, 160}
 	win.SetZone(HZoneCenter, VZoneCenter)
-	windows = []*windowData{win}
+	ctx.windows = []*windowData{win}
 	pos := win.Position
-	dragWindowResize(win, PART_RIGHT, point{30, 0})
+	ctx.dragWindowResize(win, PART_RIGHT, point{30, 0})
 	if win.zone != nil || win.Position != pos || win.Size != (point{230, 160}) {
 		t.Fatalf("zone moved the opposite edge while resizing: %v %v", win.Position, win.Size)
 	}
 }
 
 func TestWindowResizeSnapKeepsOppositeEdgeFixed(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, scale := range []float32{1, 2} {
 		for _, part := range []dragType{PART_LEFT, PART_TOP} {
 			t.Run(fmt.Sprintf("scale=%g/edge=%d", scale, part), func(t *testing.T) {
-				setupWindowResizeTest(t, scale, false)
-				windowSnapping = true
-				win := NewWindow()
+				ctx.setupWindowResizeTest(t, scale, false)
+				ctx.windowSnapping = true
+				win := ctx.NewWindow()
 				win.Position, win.Size = point{5, 5}, point{200, 160}
-				windows = []*windowData{win}
+				ctx.windows = []*windowData{win}
 				fixed := pointAdd(win.Position, win.Size)
-				if !snapResize(win, part) {
+				if !ctx.snapResize(win, part) {
 					t.Fatal("edge did not snap to screen")
 				}
 				if pointAdd(win.Position, win.Size) != fixed {
@@ -181,15 +191,17 @@ func TestWindowResizeSnapKeepsOppositeEdgeFixed(t *testing.T) {
 }
 
 func TestWindowResizeSnapsToOtherWindowAtUIScale(t *testing.T) {
-	setupWindowResizeTest(t, 2, false)
-	windowSnapping = true
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	ctx.setupWindowResizeTest(t, 2, false)
+	ctx.windowSnapping = true
+	win := ctx.NewWindow()
 	win.Position, win.Size = point{100, 80}, point{200, 160}
-	other := NewWindow()
+	other := ctx.NewWindow()
 	other.NoScale, other.Open = true, true
 	other.Position, other.Size = point{610, 160}, point{100, 200}
-	windows = []*windowData{win, other}
-	if !snapResize(win, PART_RIGHT) {
+	ctx.windows = []*windowData{win, other}
+	if !ctx.snapResize(win, PART_RIGHT) {
 		t.Fatal("resize did not snap to the neighboring window")
 	}
 	if win.Position != (point{100, 80}) || win.Size != (point{205, 160}) {
@@ -198,30 +210,32 @@ func TestWindowResizeSnapsToOtherWindowAtUIScale(t *testing.T) {
 }
 
 func TestWindowResizeDetachesWithoutFastMouseMovement(t *testing.T) {
-	setupWindowResizeTest(t, 1, false)
-	windowSnapping = true
-	win := NewWindow()
-	win.Position, win.Size = point{100, 80}, point{191, 160}
-	other := NewWindow()
-	other.Position, other.Size, other.Open = point{300, 80}, point{100, 160}, true
-	windows = []*windowData{win, other}
+	ctx := newTestContext(t)
 
-	if !snapResize(win, PART_RIGHT) || win.Size.X != 200 {
+	ctx.setupWindowResizeTest(t, 1, false)
+	ctx.windowSnapping = true
+	win := ctx.NewWindow()
+	win.Position, win.Size = point{100, 80}, point{191, 160}
+	other := ctx.NewWindow()
+	other.Position, other.Size, other.Open = point{300, 80}, point{100, 160}, true
+	ctx.windows = []*windowData{win, other}
+
+	if !ctx.snapResize(win, PART_RIGHT) || win.Size.X != 200 {
 		t.Fatalf("right edge did not snap: position=%v size=%v", win.Position, win.Size)
 	}
-	dragWindowResize(win, PART_RIGHT, point{-5, 0})
-	if snapResize(win, PART_RIGHT) {
+	ctx.dragWindowResize(win, PART_RIGHT, point{-5, 0})
+	if ctx.snapResize(win, PART_RIGHT) {
 		t.Fatal("slow resize immediately snapped back to the same edge")
 	}
 	if win.Size.X != 195 || !win.resizeSnapAnchorX {
 		t.Fatalf("slow resize did not begin detaching: size=%v anchored=%t", win.Size, win.resizeSnapAnchorX)
 	}
 
-	dragWindowResize(win, PART_RIGHT, point{-8, 0})
+	ctx.dragWindowResize(win, PART_RIGHT, point{-8, 0})
 	if win.resizeSnapAnchorX {
 		t.Fatal("resize anchor remained active beyond the release threshold")
 	}
-	if snapResize(win, PART_RIGHT) {
+	if ctx.snapResize(win, PART_RIGHT) {
 		t.Fatal("resize resnapped after leaving the capture radius")
 	}
 }

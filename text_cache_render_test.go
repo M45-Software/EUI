@@ -17,15 +17,17 @@ import (
 )
 
 func TestRenderUITextCache(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_TEXT_CACHE") == "" {
 		t.Skip("set EUI_RENDER_TEXT_CACHE=1")
 	}
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	plainUIText.clear()
-	defer plainUIText.clear()
-	game := &textCacheGame{t: t}
+	ctx.plainUIText.clear()
+	defer ctx.plainUIText.clear()
+	game := &textCacheGame{ctx: ctx, t: t}
 	if err := ebiten.RunGame(game); err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +37,8 @@ func TestRenderUITextCache(t *testing.T) {
 }
 
 type textCacheGame struct {
+	ctx *Context
+
 	t    *testing.T
 	done bool
 	err  error
@@ -55,6 +59,8 @@ func (g *textCacheGame) Draw(_ *ebiten.Image) {
 	g.err = g.verify()
 }
 func (g *textCacheGame) verify() error {
+	ctx := g.ctx
+
 	before, after := ebiten.NewImage(360, 220), ebiten.NewImage(360, 220)
 	defer before.Deallocate()
 	defer after.Deallocate()
@@ -74,8 +80,8 @@ func (g *textCacheGame) verify() error {
 							before.Fill(bg)
 							after.Fill(bg)
 							clip := image.Rect(12, 14, 340, 210)
-							text.Draw(before.SubImage(clip).(*ebiten.Image), value, textFace(size), op)
-							drawCachedUIText(after.SubImage(clip).(*ebiten.Image), value, textFace(size), op)
+							text.Draw(before.SubImage(clip).(*ebiten.Image), value, ctx.textFace(size), op)
+							ctx.drawCachedUIText(after.SubImage(clip).(*ebiten.Image), value, ctx.textFace(size), op)
 							before.ReadPixels(a)
 							after.ReadPixels(b)
 							for i := range a {
@@ -89,47 +95,47 @@ func (g *textCacheGame) verify() error {
 			}
 		}
 	}
-	plainUIText.clear()
+	ctx.plainUIText.clear()
 	op := &text.DrawOptions{}
 	op.Filter = ebiten.FilterNearest
 	op.DisableMipmaps = true
 	for i := 0; i < maxUITextEntries+10; i++ {
-		drawCachedUIText(after, fmt.Sprintf("line %d", i), textFace(14), op)
+		ctx.drawCachedUIText(after, fmt.Sprintf("line %d", i), ctx.textFace(14), op)
 	}
-	if len(plainUIText.entries) > maxUITextEntries || plainUIText.bytes > maxUITextBytes {
+	if len(ctx.plainUIText.entries) > maxUITextEntries || ctx.plainUIText.bytes > maxUITextBytes {
 		return fmt.Errorf("text cache exceeded budget")
 	}
-	misses := plainUIText.misses
-	drawCachedUIText(after, "line 265", textFace(14), op)
-	if plainUIText.misses != misses {
+	misses := ctx.plainUIText.misses
+	ctx.drawCachedUIText(after, "line 265", ctx.textFace(14), op)
+	if ctx.plainUIText.misses != misses {
 		return fmt.Errorf("recent text was evicted")
 	}
-	plainUIText.clear()
+	ctx.plainUIText.clear()
 	op.LineSpacing = 28
 	for i := range 24 {
 		value := fmt.Sprintf("%d", i) + strings.Repeat(strings.Repeat("W", 30)+"\n", 7)
-		drawCachedUIText(after, value, textFace(24), op)
+		ctx.drawCachedUIText(after, value, ctx.textFace(24), op)
 	}
-	if len(plainUIText.entries) == 0 || len(plainUIText.entries) >= 24 || plainUIText.bytes > maxUITextBytes {
-		return fmt.Errorf("byte budget not exercised/enforced: entries=%d bytes=%d", len(plainUIText.entries), plainUIText.bytes)
+	if len(ctx.plainUIText.entries) == 0 || len(ctx.plainUIText.entries) >= 24 || ctx.plainUIText.bytes > maxUITextBytes {
+		return fmt.Errorf("byte budget not exercised/enforced: entries=%d bytes=%d", len(ctx.plainUIText.entries), ctx.plainUIText.bytes)
 	}
 	// Exercise the production item path: NewText supplies a default face,
 	// so checking only item.Face == nil would silently bypass this cache.
-	plainUIText.clear()
-	item, _ := NewText()
+	ctx.plainUIText.clear()
+	item, _ := ctx.NewText()
 	item.Text = "Unchanged row"
 	for range 2 {
 		item.drawItemInternal(point{}, point{}, point{360, 220}, rect{X1: 360, Y1: 220}, after)
 	}
-	if plainUIText.hits != 1 || plainUIText.misses != 1 {
-		return fmt.Errorf("plain item did not reuse text: hits=%d misses=%d", plainUIText.hits, plainUIText.misses)
+	if ctx.plainUIText.hits != 1 || ctx.plainUIText.misses != 1 {
+		return fmt.Errorf("plain item did not reuse text: hits=%d misses=%d", ctx.plainUIText.hits, ctx.plainUIText.misses)
 	}
 	item.Text = "Changed row"
 	item.drawItemInternal(point{}, point{}, point{360, 220}, rect{X1: 360, Y1: 220}, after)
-	if plainUIText.misses != 2 {
+	if ctx.plainUIText.misses != 2 {
 		return fmt.Errorf("changed text reused stale pixels")
 	}
-	plainUIText.clear()
+	ctx.plainUIText.clear()
 	for _, ttf := range [][]byte{goregular.TTF, gobold.TTF, goitalic.TTF} {
 		source, err := text.NewGoTextFaceSource(bytes.NewReader(ttf))
 		if err != nil {
@@ -142,7 +148,7 @@ func (g *textCacheGame) verify() error {
 				before.Clear()
 				after.Clear()
 				text.Draw(before, "Styled text Ágj", face, op)
-				drawCachedUIText(after, "Styled text Ágj", face, op)
+				ctx.drawCachedUIText(after, "Styled text Ágj", face, op)
 				before.ReadPixels(a)
 				after.ReadPixels(b)
 				for i := range a {
@@ -153,9 +159,39 @@ func (g *textCacheGame) verify() error {
 			}
 		}
 	}
-	if plainUIText.hits != 6 || plainUIText.misses != 6 {
+	if ctx.plainUIText.hits != 6 || ctx.plainUIText.misses != 6 {
 		return fmt.Errorf("font variants or equivalent faces were not keyed correctly")
 	}
+	// Eviction must reuse cleared allocations without altering prior or new draws.
+	oldPotato := ctx.potatoMode
+	defer ctx.SetPotatoMode(oldPotato)
+	for _, mode := range []bool{false, true} {
+		ctx.SetPotatoMode(mode)
+		ctx.plainUIText.clear()
+		op = &text.DrawOptions{}
+		op.GeoM.Translate(12.5, 20.25)
+		op.Filter = ebiten.FilterNearest
+		op.DisableMipmaps = true
+		for i := 0; i < maxUITextEntries+20; i++ {
+			value := fmt.Sprintf("pooled line %04d", i)
+			after.Clear()
+			ctx.drawCachedUIText(after, value, ctx.textFace(14), op)
+		}
+		before.Clear()
+		text.Draw(before, fmt.Sprintf("pooled line %04d", maxUITextEntries+19), ctx.textFace(14), op)
+		before.ReadPixels(a)
+		after.ReadPixels(b)
+		for i := range a {
+			if d := int(a[i]) - int(b[i]); d < -2 || d > 2 {
+				return fmt.Errorf("reused text allocation has stale pixels at %d", i)
+			}
+		}
+		stats := ctx.plainUIText.targets.Stats()
+		if stats.Reuses == 0 || stats.FreeBytes > 1<<20 || stats.ActiveBytes > maxUITextBytes {
+			return fmt.Errorf("text allocation reuse/budget failed: %+v", stats)
+		}
+	}
+	ctx.SetPotatoMode(oldPotato)
 	// This measures repeated text submission with readback, not gameplay FPS.
 	measure := func(cached bool) time.Duration {
 		start := time.Now()
@@ -165,9 +201,9 @@ func (g *textCacheGame) verify() error {
 				op.GeoM.Reset()
 				op.GeoM.Translate(float64(i%3*110), float64(i/3*10))
 				if cached {
-					drawCachedUIText(after, "Player status text", textFace(14), op)
+					ctx.drawCachedUIText(after, "Player status text", ctx.textFace(14), op)
 				} else {
-					text.Draw(after, "Player status text", textFace(14), op)
+					text.Draw(after, "Player status text", ctx.textFace(14), op)
 				}
 			}
 			after.ReadPixels(b)

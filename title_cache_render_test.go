@@ -11,13 +11,15 @@ import (
 )
 
 func TestRenderWindowTitleCache(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_TITLE_CACHE") == "" {
 		t.Skip("set EUI_RENDER_TITLE_CACHE=1")
 	}
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	game := &windowTitleCacheGame{}
+	game := &windowTitleCacheGame{ctx: ctx}
 	if err := ebiten.RunGame(game); err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +29,8 @@ func TestRenderWindowTitleCache(t *testing.T) {
 }
 
 type windowTitleCacheGame struct {
+	ctx *Context
+
 	done bool
 	err  error
 }
@@ -41,12 +45,14 @@ func (game *windowTitleCacheGame) Update() error {
 }
 
 func (game *windowTitleCacheGame) Draw(_ *ebiten.Image) {
+	ctx := game.ctx
+
 	if game.done {
 		return
 	}
 	game.done = true
 
-	win := NewWindow()
+	win := ctx.NewWindow()
 	defer win.deallocate()
 	win.Title = "Players"
 	win.Position = point{X: 17, Y: 11}

@@ -3,12 +3,14 @@ package eui
 import "testing"
 
 func TestSliderTooltipIndicatorRequiresLabel(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.ShowTooltipIndicators = true
-	slider, _ := NewSlider()
+	slider, _ := ctx.NewSlider()
 	slider.Size = Point{X: 180, Y: 24}
 	slider.SetTooltip("Adjust the enhancement strength.")
 	win.AddItem(slider)
@@ -25,16 +27,18 @@ func TestSliderTooltipIndicatorRequiresLabel(t *testing.T) {
 }
 
 func TestInputTooltipIndicatorReservesEditingViewport(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	previousScale := uiScale
-	defer func() { uiScale = previousScale }()
+	previousScale := ctx.uiScale
+	defer func() { ctx.uiScale = previousScale }()
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
-		win := NewWindow()
+		ctx.uiScale = scale
+		win := ctx.NewWindow()
 		win.ShowTooltipIndicators = true
-		input, _ := NewInput()
+		input, _ := ctx.NewInput()
 		input.Text = "A long field value that scrolls past the marker"
 		input.SetTooltip("Rename this scene")
 		win.AddItem(input)

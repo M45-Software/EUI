@@ -14,12 +14,14 @@ import (
 
 // Run alone: coverage comparisons and timings require Ebitengine's game loop.
 func TestRenderPrimitiveCache(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_PRIMITIVE_CACHE") == "" {
 		t.Skip("set EUI_RENDER_PRIMITIVE_CACHE=1")
 	}
-	uiPrimitives.clear()
-	defer uiPrimitives.clear()
-	g := &primitiveCacheGame{t: t}
+	ctx.uiPrimitives.clear()
+	defer ctx.uiPrimitives.clear()
+	g := &primitiveCacheGame{ctx: ctx, t: t}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +31,8 @@ func TestRenderPrimitiveCache(t *testing.T) {
 }
 
 type primitiveCacheGame struct {
+	ctx *Context
+
 	t    *testing.T
 	done bool
 	err  error
@@ -50,6 +54,8 @@ func (g *primitiveCacheGame) Draw(_ *ebiten.Image) {
 }
 
 func (g *primitiveCacheGame) verify() error {
+	ctx := g.ctx
+
 	want, got := ebiten.NewImage(360, 220), ebiten.NewImage(360, 220)
 	defer want.Deallocate()
 	defer got.Deallocate()
@@ -85,17 +91,17 @@ func (g *primitiveCacheGame) verify() error {
 					for _, filled := range []bool{false, true} {
 						r := roundRect{Size: point{size.X * scale, size.Y * scale}, Position: point{7.25, 8.75}, Fillet: radius * scale, Border: 1.5 * scale, Filled: filled, Color: tint}
 						label := fmt.Sprintf("rectangle %+v", r)
-						if err := compare(label, func(dst *ebiten.Image) { drawRoundRectVector(dst, &r) }, func(dst *ebiten.Image) { drawRoundRect(dst, &r) }); err != nil {
+						if err := compare(label, func(dst *ebiten.Image) { ctx.drawRoundRectVector(dst, &r) }, func(dst *ebiten.Image) { ctx.drawRoundRect(dst, &r) }); err != nil {
 							return err
 						}
 					}
 				}
 			}
 			start, mid, end := point{12.25 * scale, 16.25 * scale}, point{17.5 * scale, 21.5 * scale}, point{25.75 * scale, 11.75 * scale}
-			if err := compare("checkmark", func(dst *ebiten.Image) { drawCheckmarkVector(dst, start, mid, end, 2*scale, tint) }, func(dst *ebiten.Image) { drawCheckmark(dst, start, mid, end, 2*scale, tint) }); err != nil {
+			if err := compare("checkmark", func(dst *ebiten.Image) { drawCheckmarkVector(dst, start, mid, end, 2*scale, tint) }, func(dst *ebiten.Image) { ctx.drawCheckmark(dst, start, mid, end, 2*scale, tint) }); err != nil {
 				return err
 			}
-			if err := compare("triangle", func(dst *ebiten.Image) { drawTriangleVector(dst, start, 12*scale, tint) }, func(dst *ebiten.Image) { drawTriangle(dst, start, 12*scale, tint) }); err != nil {
+			if err := compare("triangle", func(dst *ebiten.Image) { drawTriangleVector(dst, start, 12*scale, tint) }, func(dst *ebiten.Image) { ctx.drawTriangle(dst, start, 12*scale, tint) }); err != nil {
 				return err
 			}
 		}
@@ -104,8 +110,8 @@ func (g *primitiveCacheGame) verify() error {
 				x0, y0, x1, y1 := endpoints[0], endpoints[1], endpoints[2], endpoints[3]
 				if err := compare("diagonal line", func(dst *ebiten.Image) {
 					off := pixelOffset(width)
-					strokeLineFn(dst, float32(roundedPixel(x0))+off, float32(roundedPixel(y0))+off, float32(roundedPixel(x1))+off, float32(roundedPixel(y1))+off, width, color.RGBA(tint), true)
-				}, func(dst *ebiten.Image) { strokeLine(dst, x0, y0, x1, y1, width, color.RGBA(tint), true) }); err != nil {
+					ctx.strokeLineFn(dst, float32(roundedPixel(x0))+off, float32(roundedPixel(y0))+off, float32(roundedPixel(x1))+off, float32(roundedPixel(y1))+off, width, color.RGBA(tint), true)
+				}, func(dst *ebiten.Image) { ctx.strokeLine(dst, x0, y0, x1, y1, width, color.RGBA(tint), true) }); err != nil {
 					return err
 				}
 			}
@@ -118,8 +124,8 @@ func (g *primitiveCacheGame) verify() error {
 						}
 						if err := compare(fmt.Sprintf("line width=%v length=%v vertical=%v aa=%v", width, length, vertical, aa), func(dst *ebiten.Image) {
 							off := pixelOffset(width)
-							strokeLineFn(dst, float32(roundedPixel(x0))+off, float32(roundedPixel(y0))+off, float32(roundedPixel(x1))+off, float32(roundedPixel(y1))+off, width, color.RGBA(tint), aa)
-						}, func(dst *ebiten.Image) { strokeLine(dst, x0, y0, x1, y1, width, color.RGBA(tint), aa) }); err != nil {
+							ctx.strokeLineFn(dst, float32(roundedPixel(x0))+off, float32(roundedPixel(y0))+off, float32(roundedPixel(x1))+off, float32(roundedPixel(y1))+off, width, color.RGBA(tint), aa)
+						}, func(dst *ebiten.Image) { ctx.strokeLine(dst, x0, y0, x1, y1, width, color.RGBA(tint), aa) }); err != nil {
 							return err
 						}
 					}
@@ -127,33 +133,33 @@ func (g *primitiveCacheGame) verify() error {
 			}
 		}
 	}
-	uiPrimitives.clear()
+	ctx.uiPrimitives.clear()
 	for i := range 100 {
 		r := roundRect{Size: point{float32(100 + i), 32}, Fillet: 4, Border: 1, Color: NewColor(uint8(i), 100, 150, 200)}
-		drawRoundRect(got, &r)
-		strokeLine(got, 0, 100, float32(100+i), 100, 2, r.Color, true)
+		ctx.drawRoundRect(got, &r)
+		ctx.strokeLine(got, 0, 100, float32(100+i), 100, 2, r.Color, true)
 	}
-	if uiPrimitives.misses != 2 {
-		return fmt.Errorf("width/color changes created %d masks; want 2", uiPrimitives.misses)
+	if ctx.uiPrimitives.misses != 2 {
+		return fmt.Errorf("width/color changes created %d masks; want 2", ctx.uiPrimitives.misses)
 	}
-	g.t.Logf("Shared geometry: %d hits, %d misses, %d bytes", uiPrimitives.hits, uiPrimitives.misses, uiPrimitives.bytes)
+	g.t.Logf("Shared geometry: %d hits, %d misses, %d bytes", ctx.uiPrimitives.hits, ctx.uiPrimitives.misses, ctx.uiPrimitives.bytes)
 	for radius := float32(1); radius <= 120; radius++ {
 		r := roundRect{Size: point{600, 600}, Fillet: radius, Color: ColorWhite, Filled: true}
-		drawRoundRect(got, &r)
+		ctx.drawRoundRect(got, &r)
 	}
-	if uiPrimitives.bytes > maxPrimitiveBytes || len(uiPrimitives.entries) > maxPrimitiveEntries || uiPrimitives.evictions == 0 {
-		return fmt.Errorf("cache budget not enforced: bytes=%d entries=%d evictions=%d", uiPrimitives.bytes, len(uiPrimitives.entries), uiPrimitives.evictions)
+	if ctx.uiPrimitives.bytes > maxPrimitiveBytes || len(ctx.uiPrimitives.entries) > maxPrimitiveEntries || ctx.uiPrimitives.evictions == 0 {
+		return fmt.Errorf("cache budget not enforced: bytes=%d entries=%d evictions=%d", ctx.uiPrimitives.bytes, len(ctx.uiPrimitives.entries), ctx.uiPrimitives.evictions)
 	}
-	uiPrimitives.clear()
+	ctx.uiPrimitives.clear()
 	for x := 5; x < 22; x++ {
 		for y := 5; y < 22; y++ {
-			strokeLine(got, 10, 10, float32(10+x), float32(10+y), 1, ColorWhite, true)
+			ctx.strokeLine(got, 10, 10, float32(10+x), float32(10+y), 1, ColorWhite, true)
 		}
 	}
-	if len(uiPrimitives.entries) != maxPrimitiveEntries || uiPrimitives.evictions == 0 {
-		return fmt.Errorf("entry budget not enforced: %d entries, %d evictions", len(uiPrimitives.entries), uiPrimitives.evictions)
+	if len(ctx.uiPrimitives.entries) != maxPrimitiveEntries || ctx.uiPrimitives.evictions == 0 {
+		return fmt.Errorf("entry budget not enforced: %d entries, %d evictions", len(ctx.uiPrimitives.entries), ctx.uiPrimitives.evictions)
 	}
-	uiPrimitives.clear()
+	ctx.uiPrimitives.clear()
 	// Identical repeated controls, with a GPU readback after each group so these
 	// timings include submitted work instead of only queuing draw commands.
 	measure := func(cached bool) time.Duration {
@@ -163,9 +169,9 @@ func (g *primitiveCacheGame) verify() error {
 			for i := range 100 {
 				r := roundRect{Position: point{float32(i%4) * 80, float32(i/4%8) * 24}, Size: point{72, 20}, Fillet: 4, Border: 1, Color: ColorWhite, Filled: i%2 == 0}
 				if cached {
-					drawRoundRect(got, &r)
+					ctx.drawRoundRect(got, &r)
 				} else {
-					drawRoundRectVector(got, &r)
+					ctx.drawRoundRectVector(got, &r)
 				}
 			}
 			got.ReadPixels(gotPixels)
@@ -183,10 +189,10 @@ func (g *primitiveCacheGame) verify() error {
 			for i := range 100 {
 				x, y := i%50*6+10, i/50*30+10
 				if single {
-					strokeLine(got, float32(x), float32(y), float32(x), float32(y+14), 1, ColorWhite, false)
+					ctx.strokeLine(got, float32(x), float32(y), float32(x), float32(y+14), 1, ColorWhite, false)
 				} else {
 					key := primitiveKey{kind: primitiveLine, width: 5, height: 10, stroke: 1, points: [6]int{2, 2, 2, 7}}
-					mask := uiPrimitives.mask(key)
+					mask := ctx.uiPrimitives.mask(key)
 					drawPrimitiveMask(got, mask, x-2, y-2, 5, 19, 3, 3, ColorWhite)
 				}
 			}

@@ -6,16 +6,18 @@ import (
 )
 
 func TestWrappedLabelReflowsForWidthScaleAndContent(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	originalScale := UIScale()
-	t.Cleanup(func() { SetUIScale(originalScale) })
-	label := NewWrappedLabel("Preferences apply to every character using this script.\nChanges save immediately.", 150)
+	originalScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(originalScale) })
+	label := ctx.NewWrappedLabel("Preferences apply to every character using this script.\nChanges save immediately.", 150)
 	for _, scale := range []float32{1, 1.5, 2} {
-		SetUIScale(scale)
+		ctx.SetUIScale(scale)
 		size := label.GetSize()
-		face := textFace(label.FontSize*scale + 2)
+		face := ctx.textFace(label.FontSize*scale + 2)
 		for _, line := range strings.Split(label.Text, "\n") {
 			if width := MeasureTextWidth(line, face); width > float64(size.X) {
 				t.Fatalf("line width %.1f exceeds label %.1f at %.1fx", width, size.X, scale)

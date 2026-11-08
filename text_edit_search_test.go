@@ -6,11 +6,13 @@ import (
 )
 
 func TestTextEditorFindTextWrapsAndRevealsUnicodeMatches(t *testing.T) {
+	ctx := newTestContext(t)
+
 	value := "Élan\n" + strings.Repeat("other line\n", 30) + "élan"
-	item := editingFixture(t, value, true)
-	oldSearch := activeSearch
-	t.Cleanup(func() { activeSearch = oldSearch })
-	win := NewWindow()
+	item := ctx.editingFixture(t, value, true)
+	oldSearch := ctx.activeSearch
+	t.Cleanup(func() { ctx.activeSearch = oldSearch })
+	win := ctx.NewWindow()
 	win.Open, win.Searchable = true, true
 	win.OpenSearch()
 	for _, tc := range []struct {
@@ -26,7 +28,7 @@ func TestTextEditorFindTextWrapsAndRevealsUnicodeMatches(t *testing.T) {
 		if tc.want > 0 && item.editor().scroll.Y <= 0 {
 			t.Fatal("distant match was not scrolled into view")
 		}
-		if focusedItem != nil || activeSearch != win || item.Text != value || len(item.editor().undo) != 0 {
+		if ctx.focusedItem != nil || ctx.activeSearch != win || item.Text != value || len(item.editor().undo) != 0 {
 			t.Fatal("search stole focus or modified the draft")
 		}
 	}

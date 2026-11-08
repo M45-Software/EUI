@@ -71,18 +71,20 @@ func (win *windowData) ClearZone() {
 }
 
 func (win *windowData) updateZonePosition() {
+	ctx := win.ui()
+
 	if win.zone == nil {
 		return
 	}
-	cx := hZoneCoord(win.zone.h, screenWidth)
-	cy := vZoneCoord(win.zone.v, screenHeight)
+	cx := hZoneCoord(win.zone.h, ctx.screenWidth)
+	cy := vZoneCoord(win.zone.v, ctx.screenHeight)
 	size := win.GetSize()
 	s := win.scale()
 	win.Position.X = (cx - size.X/2 + win.zone.offset.X) / s
 	win.Position.Y = (cy - size.Y/2 + win.zone.offset.Y) / s
 
-	maxX := (float32(screenWidth) - size.X) / s
-	maxY := (float32(screenHeight) - size.Y) / s
+	maxX := (float32(ctx.screenWidth) - size.X) / s
+	maxY := (float32(ctx.screenHeight) - size.Y) / s
 	if maxX < 0 {
 		maxX = 0
 	}
@@ -146,14 +148,14 @@ func vZoneCoord(z VZone, height int) float32 {
 
 // snapToCorner assigns a zone when a window is dragged close to a screen
 // corner. It returns true if a zone was applied.
-func snapToCorner(win *windowData) bool {
-	if !windowSnapping {
+func (ctx *Context) snapToCorner(win *windowData) bool {
+	if !ctx.windowSnapping {
 		return false
 	}
 	pos, size := win.Position, win.Size
 	s := win.scale()
-	sw := float32(screenWidth) / s
-	sh := float32(screenHeight) / s
+	sw := float32(ctx.screenWidth) / s
+	sh := float32(ctx.screenHeight) / s
 	near := func(a, b float32) bool {
 		return math.Abs(float64(a-b)) <= float64(CornerSnapThreshold)
 	}
@@ -208,13 +210,13 @@ func setSnapAnchor(win *windowData, dragPosition point, snapX, snapY bool) {
 // snapToWindow snaps a window to nearby screen or window edges. Comparisons
 // use the dragged window's coordinate system so scaled and unscaled windows
 // can align. The closest candidate wins independently on each axis.
-func snapToWindow(win *windowData) bool {
-	if !windowSnapping {
+func (ctx *Context) snapToWindow(win *windowData) bool {
+	if !ctx.windowSnapping {
 		return false
 	}
 	s := win.scale()
 	pos, size := win.Position, win.Size
-	sw, sh := float32(screenWidth)/s, float32(screenHeight)/s
+	sw, sh := float32(ctx.screenWidth)/s, float32(ctx.screenHeight)/s
 	bestX, bestY := CornerSnapThreshold+1, CornerSnapThreshold+1
 	delta := point{}
 	snapX, snapY := false, false
@@ -239,7 +241,7 @@ func snapToWindow(win *windowData) bool {
 		return a0 <= b1+CornerSnapThreshold && a1 >= b0-CornerSnapThreshold
 	}
 
-	for _, other := range windows {
+	for _, other := range ctx.windows {
 		if other == win || !other.Open {
 			continue
 		}
@@ -277,26 +279,26 @@ func snapToWindow(win *windowData) bool {
 
 // snapMovedWindow applies move snapping after a drag update. A snapped window
 // must first leave its anchor threshold before it can acquire another target.
-func snapMovedWindow(win *windowData) bool {
-	if !windowSnapping || win == nil || win.zone != nil {
+func (ctx *Context) snapMovedWindow(win *windowData) bool {
+	if !ctx.windowSnapping || win == nil || win.zone != nil {
 		return false
 	}
-	if !win.snapAnchorActive && snapToCorner(win) {
+	if !win.snapAnchorActive && ctx.snapToCorner(win) {
 		return true
 	}
-	return snapToWindow(win)
+	return ctx.snapToWindow(win)
 }
 
 // snapResize adjusts a window's size and position when resizing so edges
 // snap to nearby screen edges or other windows within the threshold.
 // It returns true if the window size or position was adjusted.
-func snapResize(win *windowData, part dragType) bool {
-	if !windowSnapping {
+func (ctx *Context) snapResize(win *windowData, part dragType) bool {
+	if !ctx.windowSnapping {
 		return false
 	}
 	s := win.scale()
 	pos, size := win.Position, win.Size
-	sw, sh := float32(screenWidth)/s, float32(screenHeight)/s
+	sw, sh := float32(ctx.screenWidth)/s, float32(ctx.screenHeight)/s
 	includesLeft := part == PART_LEFT || part == PART_TOP_LEFT || part == PART_BOTTOM_LEFT
 	includesRight := part == PART_RIGHT || part == PART_TOP_RIGHT || part == PART_BOTTOM_RIGHT
 	includesTop := part == PART_TOP || part == PART_TOP_LEFT || part == PART_TOP_RIGHT
@@ -329,7 +331,7 @@ func snapResize(win *windowData, part dragType) bool {
 	if includesBottom {
 		considerY(sh - pos.Y - size.Y)
 	}
-	for _, other := range windows {
+	for _, other := range ctx.windows {
 		if other == win || !other.Open {
 			continue
 		}
@@ -357,7 +359,7 @@ func snapResize(win *windowData, part dragType) bool {
 		return false
 	}
 	if delta != (point{}) {
-		dragWindowResize(win, part, delta)
+		ctx.dragWindowResize(win, part, delta)
 	}
 	win.resizeSnapAnchorPosition = win.Position
 	win.resizeSnapAnchorSize = win.Size

@@ -15,19 +15,20 @@ type shadowMaskKey struct {
 
 // Small, shared masks are stretched around the edges of a window. Neither
 // moving a window nor changing its color requires a window-sized shadow cache.
-var shadowMasks = map[shadowMaskKey]*ebiten.Image{}
 
 func (win *windowData) drawShadow(screen *ebiten.Image) {
-	if win.Docked || win.NoBGColor || !windowShadows || win.Opacity <= 0 {
+	ctx := win.ui()
+
+	if win.Docked || win.NoBGColor || !ctx.windowShadows || win.Opacity <= 0 {
 		return
 	}
 	rr := roundRect{Size: win.GetSize(), Position: win.getPosition(), Fillet: win.Fillet}
-	drawDropShadow(screen, &rr, win.ShadowSize*win.scale(), win.ShadowColor, win.ShadowFalloff, win.Opacity)
+	ctx.drawDropShadow(screen, &rr, win.ShadowSize*win.scale(), win.ShadowColor, win.ShadowFalloff, win.Opacity)
 }
 
 // ShadowColor uses straight RGB plus alpha, as in a conventional #RRGGBBAA
 // color. Black gives a shadow; a bright color gives a glow with the same falloff.
-func drawDropShadow(screen *ebiten.Image, box *roundRect, size float32, col Color, falloff, opacity float32) {
+func (ctx *Context) drawDropShadow(screen *ebiten.Image, box *roundRect, size float32, col Color, falloff, opacity float32) {
 	if size <= 0 || col.A == 0 || opacity <= 0 || box.Size.X <= 0 || box.Size.Y <= 0 {
 		return
 	}
@@ -39,17 +40,17 @@ func drawDropShadow(screen *ebiten.Image, box *roundRect, size float32, col Colo
 		radius:  int(math.Ceil(float64(max(0, min(box.Fillet, box.Size.X/2, box.Size.Y/2, 128))))),
 		falloff: max(0.25, min(falloff, 8)),
 	}
-	mask := shadowMasks[key]
+	mask := ctx.shadowMasks[key]
 	if mask == nil {
 		// Bound memory while editing themes with many different effect sizes.
-		if len(shadowMasks) >= 16 {
-			for _, cached := range shadowMasks {
+		if len(ctx.shadowMasks) >= 16 {
+			for _, cached := range ctx.shadowMasks {
 				cached.Deallocate()
 			}
-			clear(shadowMasks)
+			clear(ctx.shadowMasks)
 		}
-		mask = makeShadowMask(key)
-		shadowMasks[key] = mask
+		mask = ctx.makeShadowMask(key)
+		ctx.shadowMasks[key] = mask
 	}
 	corner := key.spread + key.radius
 	span := 2*corner + 1
@@ -79,7 +80,7 @@ func drawDropShadow(screen *ebiten.Image, box *roundRect, size float32, col Colo
 	}
 }
 
-func makeShadowMask(key shadowMaskKey) *ebiten.Image {
+func (ctx *Context) makeShadowMask(key shadowMaskKey) *ebiten.Image {
 	corner := key.spread + key.radius
 	span := 2*corner + 1
 	pixels := make([]byte, span*span*4)
@@ -98,7 +99,7 @@ func makeShadowMask(key shadowMaskKey) *ebiten.Image {
 			pixels[i], pixels[i+1], pixels[i+2], pixels[i+3] = a, a, a, a
 		}
 	}
-	mask := newManagedImage(span, span)
+	mask := ctx.newManagedImage(span, span)
 	mask.WritePixels(pixels)
 	return mask
 }

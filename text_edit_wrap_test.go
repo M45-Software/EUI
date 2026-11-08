@@ -11,11 +11,13 @@ import (
 )
 
 func TestTextEditorWordWrapPreservesSourceAndGraphemes(t *testing.T) {
+	ctx := newTestContext(t)
+
 	value := "\talpha  beta café e\u0301 👩‍💻 " + strings.Repeat("c#4/g8", 60) + "\n\nlast\tline  "
-	item := editingFixture(t, value, true)
+	item := ctx.editingFixture(t, value, true)
 	item.SetWordWrap(true)
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		item.textDrawSize = point{X: 240 * scale, Y: 90 * scale}
 		layout := item.editLayout()
 		if len(layout.lines) <= 4 {
@@ -57,7 +59,9 @@ func TestTextEditorWordWrapPreservesSourceAndGraphemes(t *testing.T) {
 }
 
 func TestTextEditorWordWrapBreaksAtWordsAndRetainsWhitespace(t *testing.T) {
-	item := editingFixture(t, "alpha beta gamma", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "alpha beta gamma", true)
 	layout := item.editLayout()
 	width := float32(text.AdvanceAt("alpha be", len("alpha be"), layout.face))
 	rows := wrapEditLine(layout.lines[0], item.Text, layout.face, width)
@@ -67,7 +71,9 @@ func TestTextEditorWordWrapBreaksAtWordsAndRetainsWhitespace(t *testing.T) {
 }
 
 func TestTextEditorWordWrapNavigationPointerAndSelection(t *testing.T) {
-	item := editingFixture(t, strings.Repeat("alpha beta gamma ", 12), true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, strings.Repeat("alpha beta gamma ", 12), true)
 	item.SetWordWrap(true)
 	layout := item.editLayout()
 	viewport, origin := item.editGeometry()
@@ -117,7 +123,9 @@ func TestTextEditorWordWrapNavigationPointerAndSelection(t *testing.T) {
 }
 
 func TestTextEditorWordWrapReflowsAndSearchesWithoutHorizontalScroll(t *testing.T) {
-	item := editingFixture(t, strings.Repeat("a long tune phrase ", 40)+"needle", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, strings.Repeat("a long tune phrase ", 40)+"needle", true)
 	item.SetWordWrap(true)
 	first := item.editLayout()
 	if item.editLayout() != first {
@@ -170,7 +178,9 @@ func TestTextEditorWordWrapReflowsAndSearchesWithoutHorizontalScroll(t *testing.
 }
 
 func TestTextEditorWrappedColorSwatchKeepsSplitTextVisible(t *testing.T) {
-	item := editingFixture(t, "abc "+strings.Repeat("1234567890", 40), true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "abc "+strings.Repeat("1234567890", 40), true)
 	item.SetWordWrap(true)
 	span := TextColorSpan{Start: 4, End: 150, Color: ColorRed}
 	if item.textSwatchVisible(span) || item.textSwatchCovers([]TextColorSpan{span}, 5) {

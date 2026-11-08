@@ -36,13 +36,13 @@ type primitiveMask struct {
 }
 
 type primitiveCache struct {
+	ctx *Context
+
 	entries                 map[primitiveKey]primitiveMask
 	bytes                   int
 	clock                   uint64
 	hits, misses, evictions uint64
 }
-
-var uiPrimitives primitiveCache
 
 func (key primitiveKey) allocationSize() (int, int) {
 	if key.kind == primitiveRoundRect {
@@ -62,10 +62,12 @@ func (cache *primitiveCache) clear() {
 	for _, mask := range cache.entries {
 		mask.image.Deallocate()
 	}
-	*cache = primitiveCache{}
+	*cache = primitiveCache{ctx: cache.ctx}
 }
 
 func (cache *primitiveCache) mask(key primitiveKey) *ebiten.Image {
+	ctx := cache.ctx
+
 	cache.clock++
 	if mask, ok := cache.entries[key]; ok {
 		mask.used = cache.clock
@@ -91,14 +93,14 @@ func (cache *primitiveCache) mask(key primitiveKey) *ebiten.Image {
 		delete(cache.entries, oldestKey)
 		cache.evictions++
 	}
-	mask := newManagedImage(allocationW, allocationH)
+	mask := ctx.newManagedImage(allocationW, allocationH)
 	switch key.kind {
 	case primitiveRoundRect:
-		drawRoundRectVector(mask, &roundRect{Position: point{1, 1}, Size: point{float32(key.width), float32(key.height)},
+		ctx.drawRoundRectVector(mask, &roundRect{Position: point{1, 1}, Size: point{float32(key.width), float32(key.height)},
 			Fillet: key.radius, Border: float32(key.stroke), Filled: key.filled, Color: ColorWhite})
 	case primitiveLine:
 		off := pixelOffset(float32(key.stroke))
-		strokeLineFn(mask, float32(key.points[0])+off, float32(key.points[1])+off,
+		ctx.strokeLineFn(mask, float32(key.points[0])+off, float32(key.points[1])+off,
 			float32(key.points[2])+off, float32(key.points[3])+off, float32(key.stroke), color.White, key.aa)
 	case primitiveCheckmark:
 		drawCheckmarkVector(mask, point{float32(key.points[0]), float32(key.points[1])},
@@ -179,7 +181,7 @@ func drawPixelFrame(dst *ebiten.Image, x, y, w, h, stroke float32, tint color.Co
 	return true
 }
 
-func drawCachedRoundRect(dst *ebiten.Image, rect *roundRect) bool {
+func (ctx *Context) drawCachedRoundRect(dst *ebiten.Image, rect *roundRect) bool {
 	if rect.Fillet <= 0 {
 		if rect.Filled {
 			drawFilledRect(dst, rect.Position.X, rect.Position.Y, rect.Size.X, rect.Size.Y, color.RGBA(rect.Color), false)
@@ -215,14 +217,14 @@ func drawCachedRoundRect(dst *ebiten.Image, rect *roundRect) bool {
 	if w <= 64 && h <= 64 {
 		key.width, key.height = w, h
 	}
-	mask := uiPrimitives.mask(key)
+	mask := ctx.uiPrimitives.mask(key)
 	drawPrimitiveMask(dst, mask, x, y, w, h, corner, corner, color.RGBA(rect.Color))
 	return true
 }
 
 // Receives the same snapped endpoints as vector.StrokeLine. Axis-aligned
 // tracks share short strips across all lengths; small diagonals share masks.
-func drawCachedLine(dst *ebiten.Image, x0, y0, x1, y1, width float32, tint color.Color, aa bool) bool {
+func (ctx *Context) drawCachedLine(dst *ebiten.Image, x0, y0, x1, y1, width float32, tint color.Color, aa bool) bool {
 	stroke := int(width)
 	if stroke <= 0 {
 		return true
@@ -253,12 +255,12 @@ func drawCachedLine(dst *ebiten.Image, x0, y0, x1, y1, width float32, tint color
 	}
 	key := primitiveKey{kind: primitiveLine, width: mw + 2*pad + 1, height: mh + 2*pad + 1, stroke: stroke, aa: aa,
 		points: [6]int{xa - minX + pad, ya - minY + pad, xb - minX + pad, yb - minY + pad}}
-	mask := uiPrimitives.mask(key)
+	mask := ctx.uiPrimitives.mask(key)
 	drawPrimitiveMask(dst, mask, minX-pad, minY-pad, w+2*pad+1, h+2*pad+1, pad+1, pad+1, tint)
 	return true
 }
 
-func drawCachedCheckmark(dst *ebiten.Image, start, mid, end point, width float32, tint Color) bool {
+func (ctx *Context) drawCachedCheckmark(dst *ebiten.Image, start, mid, end point, width float32, tint Color) bool {
 	stroke := roundedPixel(width)
 	if stroke <= 0 {
 		return true
@@ -272,18 +274,18 @@ func drawCachedCheckmark(dst *ebiten.Image, start, mid, end point, width float32
 	}
 	key := primitiveKey{kind: primitiveCheckmark, width: w, height: h, stroke: stroke,
 		points: [6]int{x0 - x, y0 - y, x1 - x, y1 - y, x2 - x, y2 - y}}
-	mask := uiPrimitives.mask(key)
+	mask := ctx.uiPrimitives.mask(key)
 	drawPrimitiveMask(dst, mask, x, y, w, h, 0, 0, color.RGBA(tint))
 	return true
 }
 
-func drawCachedTriangle(dst *ebiten.Image, pos point, size float32, tint Color) bool {
+func (ctx *Context) drawCachedTriangle(dst *ebiten.Image, pos point, size float32, tint Color) bool {
 	s := roundedPixel(size)
 	if s <= 0 || s > 64 {
 		return false
 	}
 	key := primitiveKey{kind: primitiveTriangle, width: s + 2, height: s + 2}
-	mask := uiPrimitives.mask(key)
+	mask := ctx.uiPrimitives.mask(key)
 	drawPrimitiveMask(dst, mask, roundedPixel(pos.X)-1, roundedPixel(pos.Y)-1, s+2, s+2, 0, 0, color.RGBA(tint))
 	return true
 }

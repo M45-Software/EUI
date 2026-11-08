@@ -6,12 +6,12 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func tabRowHeight(item, style *itemData) float32 {
-	height := float32(defaultTabHeight) * uiScale
-	size := tabFontSize(item, style)*uiScale + 2
+func (ctx *Context) tabRowHeight(item, style *itemData) float32 {
+	height := float32(defaultTabHeight) * ctx.uiScale
+	size := tabFontSize(item, style)*ctx.uiScale + 2
 	for _, tab := range item.Tabs {
-		metrics := itemFace(tab, size).Metrics()
-		height = max(height, float32(math.Ceil(metrics.HAscent+metrics.HDescent))+4*uiScale)
+		metrics := ctx.itemFace(tab, size).Metrics()
+		height = max(height, float32(math.Ceil(metrics.HAscent+metrics.HDescent))+4*ctx.uiScale)
 	}
 	return height
 }
@@ -19,47 +19,56 @@ func tabRowHeight(item, style *itemData) float32 {
 // Tab labels determine their widths. Fixed panels wrap at their available
 // width; TabColumns also imposes a maximum number of tabs per row.
 // Drawing, content bounds, and hit targets all use these same rectangles.
-func layoutTabs(item, style *itemData) ([]rect, point) {
-	return layoutTabsInto(nil, item, style)
+func (ctx *Context) layoutTabs(item, style *itemData) ([]rect, point) {
+	return ctx.layoutTabsInto(nil, item, style)
 }
 
 // layoutTabsInto uses caller-owned rectangle storage without caching geometry.
 // Labels, fonts, scale, and available width are still measured on every call.
-func layoutTabsInto(rects []rect, item, style *itemData) ([]rect, point) {
+func (ctx *Context) layoutTabsInto(rects []rect, item, style *itemData) ([]rect, point) {
 	if cap(rects) < len(item.Tabs) {
 		rects = make([]rect, len(item.Tabs))
 	} else {
 		rects = rects[:len(item.Tabs)]
 	}
-	return rects, measureTabLayout(item, style, rects)
+	return rects, ctx.measureTabLayout(item, style, rects)
 }
 
 // Bounds queries do not need to allocate the per-tab rectangles.
-func measureTabLayout(item, style *itemData, rects []rect) point {
+func (ctx *Context) measureTabLayout(item, style *itemData, rects []rect) point {
 	if item == nil || len(item.Tabs) == 0 {
 		return point{}
 	}
-	height := tabRowHeight(item, style)
-	gap := 3 * uiScale
-	padding := 2 * max(8*uiScale, item.BorderPad*uiScale+4*uiScale)
-	size := tabFontSize(item, style)*uiScale + 2
+	height := ctx.tabRowHeight(item, style)
+	gap := 3 * ctx.uiScale
+	padding := 2 * max(8*ctx.uiScale, item.BorderPad*ctx.uiScale+4*ctx.uiScale)
+	size := tabFontSize(item, style)*ctx.uiScale + 2
 	limit := float32(0)
-	if item.Fixed {
-		limit = item.Size.X * uiScale
+	if item.Fixed || item.ConstrainToSize || item.FillWidth || item.MaxSize.X > 0 {
+		limit = item.constrainSize(Point{X: item.Size.X * ctx.uiScale}).X
+		if item.hasResolvedLayout() {
+			limit = item.layoutSize.X
+		}
 	}
 	var x, y, width float32
 	row, columns := 0, 0
 	for i, tab := range item.Tabs {
-		tw, _ := text.Measure(tab.Name, itemFace(tab, size), 0)
-		w := max(float32(math.Ceil(tw))+padding, 40*uiScale)
+		if tab.Invisible {
+			if i < len(rects) {
+				rects[i] = rect{}
+			}
+			continue
+		}
+		tw, _ := text.Measure(tab.Name, ctx.itemFace(tab, size), 0)
+		w := max(float32(math.Ceil(tw))+padding, 40*ctx.uiScale)
 		if item.TabWidth > 0 {
-			w = max(w, item.TabWidth*uiScale)
+			w = max(w, item.TabWidth*ctx.uiScale)
 		}
 		if columns > 0 && ((item.TabColumns > 0 && columns >= item.TabColumns) || (limit > 0 && x+w > limit)) {
 			row++
 			columns = 0
-			x = float32(row%2) * item.TabRowOffset * uiScale
-			y += height + 4*uiScale
+			x = float32(row%2) * item.TabRowOffset * ctx.uiScale
+			y += height + 4*ctx.uiScale
 		}
 		if i < len(rects) {
 			rects[i] = rect{X0: x, Y0: y, X1: x + w, Y1: y + height}
@@ -71,12 +80,12 @@ func measureTabLayout(item, style *itemData, rects []rect) point {
 	return point{X: width, Y: y + height}
 }
 
-func tabStripHeight(item, style *itemData) float32 {
-	size := measureTabLayout(item, style, nil)
+func (ctx *Context) tabStripHeight(item, style *itemData) float32 {
+	size := ctx.measureTabLayout(item, style, nil)
 	return size.Y
 }
 
-func tabStripWidth(item *itemData) float32 {
-	size := measureTabLayout(item, item.themeStyle(), nil)
+func (ctx *Context) tabStripWidth(item *itemData) float32 {
+	size := ctx.measureTabLayout(item, item.themeStyle(), nil)
 	return size.X
 }

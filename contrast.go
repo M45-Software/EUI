@@ -51,12 +51,14 @@ func readableTextColor(preferred, background Color) Color {
 }
 
 func (item *itemData) surfaceTextColor(preferred, background Color, filled bool) Color {
-	if item.Disabled {
+	ctx := item.ui()
+
+	if item.isDisabled() {
 		return preferred
 	}
 	backdrop := baseTheme.Window.BGColor
-	if currentTheme != nil {
-		backdrop = currentTheme.Window.BGColor
+	if ctx.currentTheme != nil {
+		backdrop = ctx.currentTheme.Window.BGColor
 	}
 	if item.Theme != nil {
 		backdrop = item.Theme.Window.BGColor

@@ -15,14 +15,16 @@ import (
 
 // Run alone; Ebitengine permits only one RunGame per process.
 func TestRenderTextEditing(t *testing.T) {
+	ctx := newTestContext(t)
+
 	path := os.Getenv("EUI_TEXT_EDIT_CAPTURE")
 	if path == "" {
 		t.Skip("set EUI_TEXT_EDIT_CAPTURE to a PNG path")
 	}
-	if err := Init(); err != nil {
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	g := &textEditingRenderGame{path: path}
+	g := &textEditingRenderGame{ctx: ctx, path: path}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +34,8 @@ func TestRenderTextEditing(t *testing.T) {
 }
 
 type textEditingRenderGame struct {
+	ctx *Context
+
 	done bool
 	path string
 	err  error
@@ -52,15 +56,17 @@ func (g *textEditingRenderGame) Draw(screen *ebiten.Image) {
 	g.err = g.render(screen)
 }
 func (g *textEditingRenderGame) render(screen *ebiten.Image) error {
-	if err := checkTextHighlightRendering(); err != nil {
+	ctx := g.ctx
+
+	if err := ctx.checkTextHighlightRendering(); err != nil {
 		return err
 	}
-	updateNow = time.Now()
+	ctx.updateNow = time.Now()
 	screen.Fill(color.RGBA{R: 24, G: 28, B: 36, A: 255})
 	for i, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		baseY := float32(15 + i*205)
-		input, _ := NewInput()
+		input, _ := ctx.NewInput()
 		input.Text = "Name: café and selected text"
 		input.Label = fmt.Sprintf("Single line / %.1fx", scale)
 		input.Size = point{X: 380 / scale, Y: 25}
@@ -68,7 +74,7 @@ func (g *textEditingRenderGame) render(screen *ebiten.Image) error {
 		input.editSelect(6, 10)
 		var dropdowns []openDropdown
 		input.drawItem(nil, point{X: 15, Y: baseY}, point{}, rect{X1: 840, Y1: 640}, screen, &dropdowns)
-		area, _ := NewTextArea()
+		area, _ := ctx.NewTextArea()
 		area.Text = "func greet() {\n\tprint(\"Hello!\")\n\n\t// Another line with a longer comment that wraps across visual rows without changing the source file.\n}\n"
 		area.SetWordWrap(true)
 		area.SetTextHighlighter(func(value string) []TextColorSpan {
@@ -124,7 +130,7 @@ func (g *textEditingRenderGame) render(screen *ebiten.Image) error {
 		screen.DrawImage(baseline, nil)
 		baseline.Deallocate()
 		area.drawItem(nil, point{X: 425, Y: baseY}, point{}, rect{X1: 840, Y1: 640}, screen, &dropdowns)
-		long, _ := NewInput()
+		long, _ := ctx.NewInput()
 		long.Text = "A long field that scrolls horizontally to keep this caret visible"
 		long.Size = point{X: 380 / scale, Y: 25}
 		long.Focused = true

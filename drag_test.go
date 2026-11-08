@@ -3,16 +3,18 @@ package eui
 import "testing"
 
 func TestDragClearsZone(t *testing.T) {
-	screenWidth = 100
-	screenHeight = 100
-	uiScale = 1
+	ctx := newTestContext(t)
 
-	win := &windowData{Movable: true}
+	ctx.screenWidth = 100
+	ctx.screenHeight = 100
+	ctx.uiScale = 1
+
+	win := &windowData{ctx: ctx, Movable: true}
 	win.SetZone(HZoneLeft, VZoneTop)
 	oldPos := win.Position
 	delta := point{X: 5, Y: 5}
 
-	dragWindowMove(win, delta)
+	ctx.dragWindowMove(win, delta)
 
 	if win.zone != nil {
 		t.Fatalf("zone not cleared")
@@ -24,26 +26,28 @@ func TestDragClearsZone(t *testing.T) {
 }
 
 func TestDragUnsnapThreshold(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldSnapping := windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldSnapping := ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windowSnapping = oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windowSnapping = oldSnapping
 	})
 
-	screenWidth = 100
-	screenHeight = 100
-	uiScale = 1
-	windowSnapping = true
+	ctx.screenWidth = 100
+	ctx.screenHeight = 100
+	ctx.uiScale = 1
+	ctx.windowSnapping = true
 
-	win := &windowData{Movable: true}
+	win := &windowData{ctx: ctx, Movable: true}
 	// Snap to the top-left corner
-	if !snapToCorner(win) {
+	if !ctx.snapToCorner(win) {
 		t.Fatalf("expected window to snap")
 	}
 
 	// Drag slightly within the unsnap threshold
-	dragWindowMove(win, point{X: UnsnapThreshold - 1, Y: 0})
+	ctx.dragWindowMove(win, point{X: UnsnapThreshold - 1, Y: 0})
 	if win.zone != nil {
 		t.Fatalf("zone not cleared")
 	}
@@ -59,7 +63,7 @@ func TestDragUnsnapThreshold(t *testing.T) {
 
 	// Move further horizontally. Only the X axis should release, and it should
 	// jump directly to the cursor-relative position instead of slipping there.
-	dragWindowMove(win, point{X: 2, Y: 0})
+	ctx.dragWindowMove(win, point{X: 2, Y: 0})
 	if win.snapAnchorX || !win.snapAnchorY {
 		t.Fatalf("magnetic axes released incorrectly: X=%t Y=%t", win.snapAnchorX, win.snapAnchorY)
 	}
@@ -72,23 +76,25 @@ func TestDragUnsnapThreshold(t *testing.T) {
 }
 
 func TestSnapToWindowWithSnapAnchor(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
 
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 1
-	windowSnapping = true
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 1
+	ctx.windowSnapping = true
 
-	base := &windowData{Position: point{100, 20}, Size: point{10, 100}, Open: true}
-	win := &windowData{Position: point{81, 60}, Size: point{10, 20}, Open: true, Movable: true}
-	windows = []*windowData{base, win}
+	base := &windowData{ctx: ctx, Position: point{100, 20}, Size: point{10, 100}, Open: true}
+	win := &windowData{ctx: ctx, Position: point{81, 60}, Size: point{10, 20}, Open: true, Movable: true}
+	ctx.windows = []*windowData{base, win}
 
-	if !snapMovedWindow(win) {
+	if !ctx.snapMovedWindow(win) {
 		t.Fatalf("expected window to snap to nearby window")
 	}
 	expected := point{X: 90, Y: 60}
@@ -96,11 +102,11 @@ func TestSnapToWindowWithSnapAnchor(t *testing.T) {
 		t.Fatalf("expected initial snap at %+v, got %+v", expected, win.Position)
 	}
 
-	dragWindowMove(win, point{X: -5, Y: 5})
+	ctx.dragWindowMove(win, point{X: -5, Y: 5})
 	if !win.snapAnchorActive {
 		t.Fatalf("snap anchor deactivated too soon")
 	}
-	if snapMovedWindow(win) {
+	if ctx.snapMovedWindow(win) {
 		t.Fatal("window resnapped before leaving its anchor threshold")
 	}
 	expected = point{X: 90, Y: 65}
@@ -111,31 +117,33 @@ func TestSnapToWindowWithSnapAnchor(t *testing.T) {
 		t.Fatalf("cursor-relative position = %+v, want %+v", win.snapDragPosition, want)
 	}
 
-	dragWindowMove(win, point{X: -18, Y: 0})
+	ctx.dragWindowMove(win, point{X: -18, Y: 0})
 	if win.snapAnchorActive {
 		t.Fatal("snap anchor remained active beyond the unsnap threshold")
 	}
 	if want := (point{X: 58, Y: 65}); win.Position != want {
 		t.Fatalf("released position = %+v, want cursor-relative %+v", win.Position, want)
 	}
-	if snapMovedWindow(win) {
+	if ctx.snapMovedWindow(win) {
 		t.Fatal("window resnapped after moving beyond the snap threshold")
 	}
 }
 
 func TestMoveSnappingUsesWindowScale(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
 
-	screenWidth, screenHeight, uiScale = 800, 600, 2
-	windowSnapping = true
+	ctx.screenWidth, ctx.screenHeight, ctx.uiScale = 800, 600, 2
+	ctx.windowSnapping = true
 	t.Run("scaled screen corner", func(t *testing.T) {
-		win := &windowData{Position: point{X: 291, Y: 191}, Size: point{X: 100, Y: 100}}
-		if !snapToCorner(win) {
+		win := &windowData{ctx: ctx, Position: point{X: 291, Y: 191}, Size: point{X: 100, Y: 100}}
+		if !ctx.snapToCorner(win) {
 			t.Fatal("scaled window did not snap to the bottom-right corner")
 		}
 		if want := (point{X: 300, Y: 200}); win.Position != want {
@@ -144,19 +152,19 @@ func TestMoveSnappingUsesWindowScale(t *testing.T) {
 	})
 
 	t.Run("mixed-scale window edges", func(t *testing.T) {
-		base := &windowData{
+		base := &windowData{ctx: ctx,
 			Position: point{X: 410, Y: 100},
 			Size:     point{X: 100, Y: 160},
 			NoScale:  true,
 			Open:     true,
 		}
-		win := &windowData{
+		win := &windowData{ctx: ctx,
 			Position: point{X: 100, Y: 50},
 			Size:     point{X: 100, Y: 80},
 			Open:     true,
 		}
-		windows = []*windowData{base, win}
-		if !snapMovedWindow(win) {
+		ctx.windows = []*windowData{base, win}
+		if !ctx.snapMovedWindow(win) {
 			t.Fatal("scaled window did not snap to unscaled window")
 		}
 		if want := (point{X: 105, Y: 50}); win.Position != want {
@@ -169,18 +177,20 @@ func TestMoveSnappingUsesWindowScale(t *testing.T) {
 }
 
 func TestMoveSnapsToScreenEdgeAwayFromCorner(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
 
-	screenWidth, screenHeight, uiScale = 200, 200, 1
-	windowSnapping = true
-	win := &windowData{Position: point{X: 9, Y: 75}, Size: point{X: 50, Y: 50}, Open: true}
-	windows = []*windowData{win}
-	if !snapMovedWindow(win) {
+	ctx.screenWidth, ctx.screenHeight, ctx.uiScale = 200, 200, 1
+	ctx.windowSnapping = true
+	win := &windowData{ctx: ctx, Position: point{X: 9, Y: 75}, Size: point{X: 50, Y: 50}, Open: true}
+	ctx.windows = []*windowData{win}
+	if !ctx.snapMovedWindow(win) {
 		t.Fatal("window did not snap to the left screen edge")
 	}
 	if want := (point{X: 0, Y: 75}); win.Position != want {
@@ -195,21 +205,23 @@ func TestMoveSnapsToScreenEdgeAwayFromCorner(t *testing.T) {
 }
 
 func TestMoveSnappingChoosesClosestWindowEdge(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
 
-	screenWidth, screenHeight, uiScale = 500, 300, 1
-	windowSnapping = true
-	near := &windowData{Position: point{X: 154, Y: 50}, Size: point{X: 40, Y: 50}, Open: true}
-	far := &windowData{Position: point{X: 158, Y: 50}, Size: point{X: 40, Y: 50}, Open: true}
-	win := &windowData{Position: point{X: 100, Y: 50}, Size: point{X: 50, Y: 50}, Open: true}
-	windows = []*windowData{near, far, win}
+	ctx.screenWidth, ctx.screenHeight, ctx.uiScale = 500, 300, 1
+	ctx.windowSnapping = true
+	near := &windowData{ctx: ctx, Position: point{X: 154, Y: 50}, Size: point{X: 40, Y: 50}, Open: true}
+	far := &windowData{ctx: ctx, Position: point{X: 158, Y: 50}, Size: point{X: 40, Y: 50}, Open: true}
+	win := &windowData{ctx: ctx, Position: point{X: 100, Y: 50}, Size: point{X: 50, Y: 50}, Open: true}
+	ctx.windows = []*windowData{near, far, win}
 
-	if !snapMovedWindow(win) {
+	if !ctx.snapMovedWindow(win) {
 		t.Fatal("window did not snap")
 	}
 	if want := (point{X: 104, Y: 50}); win.Position != want {
@@ -218,20 +230,22 @@ func TestMoveSnappingChoosesClosestWindowEdge(t *testing.T) {
 }
 
 func TestMoveSnappingAlignsAdjacentWindowEdges(t *testing.T) {
-	oldWidth, oldHeight, oldScale := screenWidth, screenHeight, uiScale
-	oldWindows, oldSnapping := windows, windowSnapping
+	ctx := newTestContext(t)
+
+	oldWidth, oldHeight, oldScale := ctx.screenWidth, ctx.screenHeight, ctx.uiScale
+	oldWindows, oldSnapping := ctx.windows, ctx.windowSnapping
 	t.Cleanup(func() {
-		screenWidth, screenHeight, uiScale = oldWidth, oldHeight, oldScale
-		windows, windowSnapping = oldWindows, oldSnapping
+		ctx.screenWidth, ctx.screenHeight, ctx.uiScale = oldWidth, oldHeight, oldScale
+		ctx.windows, ctx.windowSnapping = oldWindows, oldSnapping
 	})
 
-	screenWidth, screenHeight, uiScale = 500, 300, 1
-	windowSnapping = true
-	base := &windowData{Position: point{X: 220, Y: 100}, Size: point{X: 100, Y: 100}, Open: true}
-	win := &windowData{Position: point{X: 153, Y: 115}, Size: point{X: 50, Y: 50}, Open: true}
-	windows = []*windowData{base, win}
+	ctx.screenWidth, ctx.screenHeight, ctx.uiScale = 500, 300, 1
+	ctx.windowSnapping = true
+	base := &windowData{ctx: ctx, Position: point{X: 220, Y: 100}, Size: point{X: 100, Y: 100}, Open: true}
+	win := &windowData{ctx: ctx, Position: point{X: 153, Y: 115}, Size: point{X: 50, Y: 50}, Open: true}
+	ctx.windows = []*windowData{base, win}
 
-	if !snapMovedWindow(win) {
+	if !ctx.snapMovedWindow(win) {
 		t.Fatal("window did not snap at normal drag distance")
 	}
 	if want := (point{X: 170, Y: 100}); win.Position != want {

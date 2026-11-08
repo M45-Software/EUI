@@ -9,7 +9,9 @@ import (
 )
 
 func TestTextCompletionTabAndUndo(t *testing.T) {
-	item := editingFixture(t, "Blue, Élo", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "Blue, Élo", false)
 	item.CompleteText = func(value string) string {
 		if value == "Blue, Élo" {
 			return "die"
@@ -42,7 +44,9 @@ func TestTextCompletionTabAndUndo(t *testing.T) {
 }
 
 func TestTextCompletionOnlyAtUnselectedSingleLineEnd(t *testing.T) {
-	item := editingFixture(t, "Blu", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "Blu", false)
 	item.CompleteText = func(string) string { return "e" }
 	for _, mods := range []inputkeys.Modifiers{{Control: true}, {Meta: true}, {Alt: true}} {
 		if item.editKey(ebiten.KeyTab, mods, false) || item.Text != "Blu" {

@@ -10,14 +10,16 @@ import (
 
 // Run alone; pixel reads require Ebitengine's game loop.
 func TestRenderWindowEffects(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_WINDOW_EFFECTS") == "" {
 		t.Skip("set EUI_RENDER_WINDOW_EFFECTS=1")
 	}
-	isolateThemeTest(t)
-	old := windowShadows
-	windowShadows = true
-	t.Cleanup(func() { windowShadows = old })
-	g := &windowEffectsGame{}
+	ctx.isolateThemeTest(t)
+	old := ctx.windowShadows
+	ctx.windowShadows = true
+	t.Cleanup(func() { ctx.windowShadows = old })
+	g := &windowEffectsGame{ctx: ctx}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
@@ -27,6 +29,8 @@ func TestRenderWindowEffects(t *testing.T) {
 }
 
 type windowEffectsGame struct {
+	ctx *Context
+
 	done bool
 	err  error
 }
@@ -39,19 +43,21 @@ func (g *windowEffectsGame) Update() error {
 	return nil
 }
 func (g *windowEffectsGame) Draw(_ *ebiten.Image) {
+	ctx := g.ctx
+
 	if g.done {
 		return
 	}
 	g.done = true
-	g.err = verifyWindowEffects()
+	g.err = ctx.verifyWindowEffects()
 }
 
-func verifyWindowEffects() error {
-	if err := LoadTheme("SeaGlass"); err != nil {
+func (ctx *Context) verifyWindowEffects() error {
+	if err := ctx.LoadTheme("SeaGlass"); err != nil {
 		return err
 	}
 	for _, noCache := range []bool{false, true} {
-		win := NewWindow()
+		win := ctx.NewWindow()
 		win.NoCache = noCache
 		win.Size = point{80, 60}
 		win.Position = point{40, 40}
@@ -105,11 +111,11 @@ func verifyWindowEffects() error {
 			return fmt.Errorf("backgroundless window drew outer effect")
 		}
 		win.NoBGColor = false
-		windowShadows = false
+		ctx.windowShadows = false
 		if draw() != 0 {
 			return fmt.Errorf("global toggle left glow enabled")
 		}
-		windowShadows = true
+		ctx.windowShadows = true
 		win.Opacity = 0
 		if draw() != 0 {
 			return fmt.Errorf("invisible window drew a glow")

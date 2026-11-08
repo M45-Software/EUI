@@ -3,13 +3,15 @@ package eui
 import "testing"
 
 func TestNoSurfaceButtonSurvivesStyleChanges(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	isolateThemeTest(t)
-	button, _ := NewButton()
+	ctx.isolateThemeTest(t)
+	button, _ := ctx.NewButton()
 	button.NoSurface = true
-	if err := LoadStyle("Outline"); err != nil {
+	if err := ctx.LoadStyle("Outline"); err != nil {
 		t.Fatal(err)
 	}
 	if !button.NoSurface {

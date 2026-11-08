@@ -6,7 +6,9 @@ import (
 )
 
 func TestTextHighlightCacheTracksEditsAndPalette(t *testing.T) {
-	item := editingFixture(t, "café\tvalue", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "café\tvalue", true)
 	layout := item.editLayout()
 	var seen []string
 	color := NewColor(120, 200, 255, 255)
@@ -50,7 +52,9 @@ func TestTextHighlightCacheTracksEditsAndPalette(t *testing.T) {
 }
 
 func TestTextHighlightRangesAreBoundedAndCopied(t *testing.T) {
-	item := editingFixture(t, "éabcdef", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "éabcdef", true)
 	red, blue, normal := ColorRed, ColorBlue, ColorWhite
 	spans := []TextColorSpan{{5, 99, blue}, {-2, 2, red}, {1, 4, blue}, {4, 4, red}, {6, 3, red}}
 	original := append([]TextColorSpan(nil), spans...)
@@ -69,7 +73,9 @@ func TestTextHighlightRangesAreBoundedAndCopied(t *testing.T) {
 }
 
 func TestTextHighlightSourceOffsetsIncludeUnicodeTabsAndNewlines(t *testing.T) {
-	item := editingFixture(t, "é\tβ\n\tcat", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "é\tβ\n\tcat", true)
 	layout := item.editLayout()
 	// Display bytes: é(0..2), three spaces(2..5), β(5..7).
 	for byteOffset, want := range map[int]int{0: 0, 2: 1, 3: 1, 4: 1, 5: 2, 7: 3} {
@@ -83,7 +89,9 @@ func TestTextHighlightSourceOffsetsIncludeUnicodeTabsAndNewlines(t *testing.T) {
 }
 
 func TestTextHighlightSkipsPasswordsAndDisabledControls(t *testing.T) {
-	item := editingFixture(t, "secret", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "secret", false)
 	calls := 0
 	item.SetTextHighlighter(func(string) []TextColorSpan {
 		calls++

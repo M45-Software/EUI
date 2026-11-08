@@ -3,21 +3,25 @@ package eui
 import "testing"
 
 func TestCloseUpdatesActiveWindow(t *testing.T) {
-	windows = nil
-	w1 := NewWindow()
-	w2 := NewWindow()
+	ctx := newTestContext(t)
+
+	ctx.windows = nil
+	w1 := ctx.NewWindow()
+	w2 := ctx.NewWindow()
 	w1.MarkOpen()
 	w2.MarkOpen()
-	activeWindow = w2
+	ctx.activeWindow = w2
 	w2.Close()
-	if activeWindow != w1 {
-		t.Fatalf("expected activeWindow to fall back to w1, got %v", activeWindow)
+	if ctx.activeWindow != w1 {
+		t.Fatalf("expected activeWindow to fall back to w1, got %v", ctx.activeWindow)
 	}
 }
 
 func TestMarkOpenCallsOnOpenOnlyForClosedWindow(t *testing.T) {
-	windows = nil
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	ctx.windows = nil
+	win := ctx.NewWindow()
 	calls := 0
 	win.OnOpen = func() { calls++ }
 
@@ -35,22 +39,24 @@ func TestMarkOpenCallsOnOpenOnlyForClosedWindow(t *testing.T) {
 }
 
 func TestBeforeClosePreservesWindowUntilAllowed(t *testing.T) {
-	oldWindows, oldActive := windows, activeWindow
-	t.Cleanup(func() { windows, activeWindow = oldWindows, oldActive })
-	windows = nil
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	oldWindows, oldActive := ctx.windows, ctx.activeWindow
+	t.Cleanup(func() { ctx.windows, ctx.activeWindow = oldWindows, oldActive })
+	ctx.windows = nil
+	win := ctx.NewWindow()
 	win.AddWindow(false)
 	win.MarkOpen()
 	allow, closed := false, 0
 	win.BeforeClose = func() bool { return allow }
 	win.OnClose = func() { closed++ }
 	win.Close()
-	if !win.Open || activeWindow != win || closed != 0 {
+	if !win.Open || ctx.activeWindow != win || closed != 0 {
 		t.Fatal("vetoed close changed window state")
 	}
 	allow = true
 	win.Close()
-	if win.Open || activeWindow == win || closed != 1 {
+	if win.Open || ctx.activeWindow == win || closed != 1 {
 		t.Fatal("allowed close did not complete")
 	}
 }

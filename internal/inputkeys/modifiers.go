@@ -1,24 +1,11 @@
 // Package inputkeys keeps desktop editing shortcuts consistent across the UI.
 package inputkeys
 
-import (
-	"runtime"
-
-	"github.com/hajimehoshi/ebiten/v2"
-)
+import "runtime"
 
 type Modifiers struct {
 	Control, Alt, Meta bool
 	Mac                bool
-}
-
-func Current() Modifiers {
-	return Modifiers{
-		Control: ebiten.IsKeyPressed(ebiten.KeyControl),
-		Alt:     ebiten.IsKeyPressed(ebiten.KeyAlt),
-		Meta:    ebiten.IsKeyPressed(ebiten.KeyMeta),
-		Mac:     runtime.GOOS == "darwin",
-	}
 }
 
 // Shortcut retains existing Control shortcuts and adds Command on macOS.

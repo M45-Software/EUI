@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Distortions81/EUI/internal/inputkeys"
 
@@ -19,7 +20,9 @@ type textEditSnapshot struct {
 }
 
 type textEditState struct {
+	composition        *editComposition
 	known              string
+	runeCount          int
 	initialized        bool
 	undo, redo         []textEditSnapshot
 	group              string
@@ -63,10 +66,13 @@ func (item *itemData) editor() *textEditState {
 	s := item.textEdit
 	value := item.editText()
 	if !s.initialized || s.known != value {
+		if s.initialized {
+			item.CancelComposition()
+		}
 		// Direct application assignments start a new document/history.
-		*s = textEditState{initialized: true, known: value, followCaret: true, caretOn: true}
+		*s = textEditState{initialized: true, known: value, runeCount: utf8.RuneCountInString(value), followCaret: true, caretOn: true}
 	}
-	n := len([]rune(value))
+	n := s.runeCount
 	item.CursorPos = max(0, min(item.CursorPos, n))
 	item.SelectStart = max(0, min(item.SelectStart, n))
 	item.SelectEnd = max(0, min(item.SelectEnd, n))
@@ -83,24 +89,32 @@ func (item *itemData) editSelection() (int, int) {
 }
 
 func (item *itemData) resetCaret() {
+	ctx := item.ui()
+
 	s := item.editor()
-	s.caretReset, s.caretOn, s.followCaret = updateNow, true, true
+	s.caretReset, s.caretOn, s.followCaret = ctx.updateNow, true, true
 	if s.caretReset.IsZero() {
-		s.caretReset = time.Now()
+		s.caretReset = ctx.uiNow()
 	}
 	item.markDirty()
 }
 
 func (item *itemData) editSelect(anchor, end int) {
-	if selectedTextItem != nil && selectedTextItem != item {
-		clearTextSelection()
+	item.CancelComposition()
+	item.setEditSelection(anchor, end)
+}
+func (item *itemData) setEditSelection(anchor, end int) {
+	ctx := item.ui()
+
+	if ctx.selectedTextItem != nil && ctx.selectedTextItem != item {
+		ctx.clearTextSelection()
 	}
-	n := len([]rune(item.editText()))
+	n := item.editor().runeCount
 	item.SelectStart = max(0, min(anchor, n))
 	item.SelectEnd = max(0, min(end, n))
 	item.CursorPos = item.SelectEnd
 	item.editor().caretUpstream = false
-	selectedTextItem = item
+	ctx.selectedTextItem = item
 	item.resetCaret()
 }
 
@@ -148,17 +162,24 @@ func (item *itemData) setEditedText(value string) {
 		}
 	}
 	item.textEdit.known = value
+	item.textEdit.runeCount = utf8.RuneCountInString(value)
 	item.textEdit.layout = nil
 }
 
 func (item *itemData) emitTextChanged() {
 	item.resetCaret()
-	if item.Handler != nil {
-		item.Handler.Emit(UIEvent{Item: item, Type: EventInputChanged, Text: item.Text})
-	}
+	item.emitEvent(UIEvent{Type: EventInputChanged, Text: item.Text})
 }
 
 func (item *itemData) editReplace(start, end int, insert, group string) {
+	item.editReplaceAt(start, end, insert, group, -1, false)
+}
+func (item *itemData) editReplaceAt(start, end int, insert, group string, caret int, fromIME bool) {
+	ctx := item.ui()
+
+	if !fromIME {
+		item.CancelComposition()
+	}
 	s := item.editor()
 	runes := []rune(item.editText())
 	start, end = max(0, min(start, len(runes))), max(0, min(end, len(runes)))
@@ -170,19 +191,22 @@ func (item *itemData) editReplace(start, end int, insert, group string) {
 		return
 	}
 	if !item.HideText {
-		if group == "" || group != s.group || updateNow.Sub(s.changed) > time.Second || len(s.redo) > 0 {
+		if group == "" || group != s.group || ctx.updateNow.Sub(s.changed) > time.Second || len(s.redo) > 0 {
 			s.undo = trimTextHistory(append(s.undo, item.editSnapshot()))
 		}
 		s.redo = nil
 	}
-	s.group, s.changed, s.hasPreferredX = group, updateNow, false
+	s.group, s.changed, s.hasPreferredX = group, ctx.updateNow, false
 	item.setEditedText(value)
 	pos := start + len([]rune(insert))
-	item.editSelect(pos, pos)
+	if caret >= 0 {
+		pos = caret
+	}
+	item.setEditSelection(pos, pos)
 	item.emitTextChanged()
 }
 
-func (item *itemData) editInsert(value, group string) {
+func (item *itemData) normalizeEditText(value string) string {
 	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 	value = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {
@@ -196,6 +220,11 @@ func (item *itemData) editInsert(value, group string) {
 		}
 		return r
 	}, value)
+	return value
+}
+func (item *itemData) editInsert(value, group string) {
+	value = item.normalizeEditText(value)
+
 	if value == "" {
 		return
 	}
@@ -205,6 +234,14 @@ func (item *itemData) editInsert(value, group string) {
 	} else {
 		group = ""
 	}
+	if item.textLimit > 0 {
+		runes := []rune(value)
+		available := max(0, item.textLimit-len([]rune(item.editText()))+(end-start))
+		value = string(runes[:min(len(runes), available)])
+		if value == "" {
+			return
+		}
+	}
 	item.editReplace(start, end, value, group)
 }
 
@@ -213,7 +250,7 @@ func (item *itemData) editInsert(value, group string) {
 // remap them afterward when applying a transformation such as formatting.
 // Unlike assigning Text directly, this preserves the existing undo history.
 func (item *itemData) ReplaceText(value string) {
-	if item.Disabled || item.HideText || !itemAcceptsTextEditing(item) {
+	if item.isDisabled() || item.HideText || !itemAcceptsTextEditing(item) {
 		return
 	}
 	before := item.editSnapshot()
@@ -227,12 +264,12 @@ func (item *itemData) ReplaceText(value string) {
 
 // CanUndo reports whether Undo can restore an earlier editor state.
 func (item *itemData) CanUndo() bool {
-	return !item.Disabled && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().undo) > 0
+	return !item.isDisabled() && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().undo) > 0
 }
 
 // CanRedo reports whether Redo can restore an undone editor state.
 func (item *itemData) CanRedo() bool {
-	return !item.Disabled && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().redo) > 0
+	return !item.isDisabled() && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().redo) > 0
 }
 
 // Undo restores the previous text, caret, and selection and emits InputChanged.
@@ -252,6 +289,9 @@ func (item *itemData) Redo() {
 }
 
 func (item *itemData) editUndo(redo bool) {
+	ctx := item.ui()
+
+	item.CancelComposition()
 	s := item.editor()
 	if item.HideText {
 		return
@@ -269,15 +309,16 @@ func (item *itemData) editUndo(redo bool) {
 	s.group, s.hasPreferredX = "", false
 	item.setEditedText(snapshot.text)
 	item.CursorPos, item.SelectStart, item.SelectEnd = snapshot.cursor, snapshot.anchor, snapshot.end
-	selectedTextItem = item
+	ctx.selectedTextItem = item
 	item.emitTextChanged()
 }
 
 func graphemeStops(value string) []int {
 	var seg segmenter.Segmenter
-	seg.Init([]rune(value))
+	runes := []rune(value)
+	seg.Init(runes)
 	it := seg.GraphemeIterator()
-	stops := []int{0}
+	stops := make([]int, 1, len(runes)+1)
 	for it.Next() {
 		g := it.Grapheme()
 		stops = append(stops, g.Offset+len(g.Text))
@@ -529,7 +570,7 @@ func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bo
 }
 
 func (item *itemData) textCompletion() string {
-	if item.CompleteText == nil || item.Multiline || item.HideText || !item.Focused || item.Disabled ||
+	if item.CompleteText == nil || item.Multiline || item.HideText || !item.Focused || item.isDisabled() ||
 		item.SelectStart != item.SelectEnd || item.CursorPos != len([]rune(item.editText())) {
 		return ""
 	}

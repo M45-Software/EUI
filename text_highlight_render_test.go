@@ -10,10 +10,10 @@ import (
 
 // Called by the existing opt-in text editing render harness. Pixel equality
 // checks exercise the real glyph renderer, including shaping and clipping.
-func checkTextHighlightRendering() error {
+func (ctx *Context) checkTextHighlightRendering() error {
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
-		area, _ := NewTextArea()
+		ctx.uiScale = scale
+		area, _ := ctx.NewTextArea()
 		area.Text = "\tAV café e\u0301 ffi\n\tβeta שלום second line with horizontal overflow\nthird line"
 		area.Size = point{X: 220, Y: 80}
 		area.Focused = true

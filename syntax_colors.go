@@ -43,9 +43,11 @@ func DefaultSyntaxColors(background Color) SyntaxColors {
 }
 
 // CurrentSyntaxColors returns a copy of the active theme's editor palette.
-func CurrentSyntaxColors() SyntaxColors {
-	if currentTheme != nil {
-		return currentTheme.Syntax
+func (ctx *Context) CurrentSyntaxColors() SyntaxColors {
+	ctx.mustAlive()
+
+	if ctx.currentTheme != nil {
+		return ctx.currentTheme.Syntax
 	}
 	return baseTheme.Syntax
 }

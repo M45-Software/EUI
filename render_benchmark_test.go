@@ -8,13 +8,15 @@ import (
 )
 
 func BenchmarkUIDrawClippedTextList(b *testing.B) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(b)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		b.Fatal(err)
 	}
-	win := NewWindow()
-	flow := &itemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: point{X: 300, Y: 200}}
+	win := ctx.NewWindow()
+	flow := &itemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: point{X: 300, Y: 200}}
 	for range 1000 {
-		flow.Contents = append(flow.Contents, &itemData{
+		flow.Contents = append(flow.Contents, &itemData{ctx: ctx,
 			ItemType: ITEM_TEXT, Text: "Player status\nAdditional information", FontSize: 12,
 			Position: point{X: 1000},
 		})
@@ -30,12 +32,14 @@ func BenchmarkUIDrawClippedTextList(b *testing.B) {
 }
 
 func BenchmarkUITextListBounds(b *testing.B) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(b)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		b.Fatal(err)
 	}
-	flow := &itemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}
+	flow := &itemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}
 	for range 1000 {
-		flow.Contents = append(flow.Contents, &itemData{
+		flow.Contents = append(flow.Contents, &itemData{ctx: ctx,
 			ItemType: ITEM_TEXT, Text: "Player status\nAdditional information", FontSize: 12,
 		})
 	}

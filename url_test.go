@@ -3,7 +3,9 @@ package eui
 import "testing"
 
 func TestURLRangesUseRuneIndexes(t *testing.T) {
-	item := &itemData{Text: "café https://example.com/path?x=1)"}
+	ctx := newTestContext(t)
+
+	item := &itemData{ctx: ctx, Text: "café https://example.com/path?x=1)"}
 	spans := item.urlRanges()
 	if len(spans) != 1 {
 		t.Fatalf("urlRanges() = %d spans, want 1", len(spans))

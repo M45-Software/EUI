@@ -10,11 +10,11 @@ import (
 // colorWheelImage creates an Ebiten image containing a color wheel of the given size.
 // The wheel ranges 0-359 degrees with black at the center and fully saturated
 // color on the outer edge.
-func colorWheelImage(size int) *ebiten.Image {
+func (ctx *Context) colorWheelImage(size int) *ebiten.Image {
 	if size <= 0 {
-		return uiRenderTargets.Acquire(1, 1, potatoMode)
+		return ctx.uiRenderTargets.Acquire(1, 1, ctx.potatoMode)
 	}
-	img := uiRenderTargets.Acquire(size, size, potatoMode)
+	img := ctx.uiRenderTargets.Acquire(size, size, ctx.potatoMode)
 	r := float64(size) / 2
 	// Use a 4x4 grid of subpixel samples for smoother edges
 	offsets := []float64{0.125, 0.375, 0.625, 0.875}

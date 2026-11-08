@@ -1,116 +1,40 @@
 package eui
 
 import (
-	"runtime"
-	"time"
-
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"golang.org/x/time/rate"
 )
 
-var (
-	isWasm         = runtime.GOOS == "js" && runtime.GOARCH == "wasm"
-	touchScrolling bool
-	prevTouchAvg   = point{}
-	wheelLimiter   = rate.NewLimiter(rate.Every(125*time.Millisecond), 1)
-)
+const touchScrollScale = .05
 
-const touchScrollScale = 0.05
+// PointerPosition returns the current native pointer, or the latest replayed
+// pointer when a custom source is installed. A sole touch (or lowest ID in a
+// multi-touch gesture) takes precedence over the mouse. UI handlers use their
+// latched frame, so calls from an embedding host do not resample UI input.
+func (ctx *Context) PointerPosition() (int, int) {
+	ctx.mustAlive()
 
-// PointerPosition returns the current pointer position in screen pixels.
-// If a touch is active, the first touch is used; otherwise the mouse cursor
-// position is returned. The coordinates already match the UI's scaled
-// coordinate space.
-func PointerPosition() (int, int) {
+	if ctx.inputSource != nil {
+		return ctx.sampledInput.x, ctx.sampledInput.y
+	}
 	ids := ebiten.AppendTouchIDs(nil)
 	if len(ids) > 0 {
-		return ebiten.TouchPosition(ids[0])
+		first := ids[0]
+		for _, id := range ids[1:] {
+			if id < first {
+				first = id
+			}
+		}
+		return ebiten.TouchPosition(first)
 	}
 	return ebiten.CursorPosition()
 }
-
-// pointerWheel returns the wheel delta for mouse or two-finger touch scrolling.
-func pointerWheel() (float64, float64) {
-	ids := ebiten.AppendTouchIDs(nil)
-	if len(ids) >= 2 {
-		// Average the first two touches to emulate wheel scrolling.
-		x0, y0 := ebiten.TouchPosition(ids[0])
-		x1, y1 := ebiten.TouchPosition(ids[1])
-		avgX := float64(x0+x1) / 2
-		avgY := float64(y0+y1) / 2
-
-		if !touchScrolling {
-			touchScrolling = true
-			prevTouchAvg = point{X: float32(avgX), Y: float32(avgY)}
-			return 0, 0
-		}
-
-		// Reverse the scroll direction so dragging two fingers up moves
-		// content up just like a mouse wheel. This provides a more
-		// natural feel on touch devices.
-		dx := (avgX - float64(prevTouchAvg.X)) * touchScrollScale
-		dy := (avgY - float64(prevTouchAvg.Y)) * touchScrollScale
-		prevTouchAvg = point{X: float32(avgX), Y: float32(avgY)}
-		return dx, dy
-	}
-
-	touchScrolling = false
-
-	wx, wy := ebiten.Wheel()
-	if isWasm {
-
-		if !wheelLimiter.Allow() {
-			return 0, 0
-		}
-
-		// Limit scroll events to +/-3 for a consistent feel in browsers
-		if wx > 0 {
-			wx = 3
-		} else if wx < 0 {
-			wx = -3
-		}
-		if wy > 0 {
-			wy = 3
-		} else if wy < 0 {
-			wy = -3
-		}
-	}
-	return wx, wy
+func (ctx *Context) pointerWheel() (float64, float64) {
+	return ctx.sampledInput.wheelX, ctx.sampledInput.wheelY
 }
+func (ctx *Context) pointerJustPressed() bool  { return ctx.sampledInput.primaryJust }
+func (ctx *Context) pointerPressed() bool      { return ctx.sampledInput.primaryDown }
+func (ctx *Context) pointerPressDuration() int { return ctx.sampledInput.primaryTicks }
 
-// pointerJustPressed reports whether the primary pointer was just pressed.
-func pointerJustPressed() bool {
-	ids := ebiten.AppendTouchIDs(nil)
-	if len(ids) > 1 {
-		return false
-	}
-	if len(inpututil.AppendJustPressedTouchIDs(nil)) > 0 {
-		return true
-	}
-	return inpututil.IsMouseButtonJustPressed(ebiten.MouseButton0)
-}
-
-// pointerPressed reports whether the primary pointer is currently pressed.
-func pointerPressed() bool {
-	ids := ebiten.AppendTouchIDs(nil)
-	if len(ids) > 1 {
-		return false
-	}
-	if len(ids) == 1 {
-		return true
-	}
-	return ebiten.IsMouseButtonPressed(ebiten.MouseButton0)
-}
-
-// pointerPressDuration returns how long the primary pointer has been pressed.
-func pointerPressDuration() int {
-	ids := ebiten.AppendTouchIDs(nil)
-	if len(ids) > 1 {
-		return 0
-	}
-	if len(ids) == 1 {
-		return inpututil.TouchPressDuration(ids[0])
-	}
-	return inpututil.MouseButtonPressDuration(ebiten.MouseButton0)
-}
+// CursorShape returns the most recent shape requested by this context's input
+// handling. It can be used by hosts drawing their own pointer.
+func (ctx *Context) CursorShape() ebiten.CursorShapeType { ctx.mustAlive(); return ctx.cursorShape }

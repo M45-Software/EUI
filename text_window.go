@@ -113,8 +113,10 @@ func (cache *TextWindowWrapCache) finish(messageCount int) {
 }
 
 // NewTextWindow creates a standardized text window with optional input bar.
-func NewTextWindow(title string, hz HZone, vz VZone, withInput bool) (*WindowData, *ItemData, *ItemData) {
-	win := NewWindow()
+func (ctx *Context) NewTextWindow(title string, hz HZone, vz VZone, withInput bool) (*WindowData, *ItemData, *ItemData) {
+	ctx.mustAlive()
+
+	win := ctx.NewWindow()
 	win.Size = Point{X: 410, Y: 450}
 	win.Title = title
 	win.Closable = true
@@ -124,16 +126,16 @@ func NewTextWindow(title string, hz HZone, vz VZone, withInput bool) (*WindowDat
 	// Only the inner list should scroll; disable window scrollbars to avoid overlap
 	win.NoScroll = true
 
-	flow := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true}
+	flow := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true}
 	win.AddItem(flow)
 
-	list := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Scrollable: true, Fixed: true}
+	list := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Scrollable: true, Fixed: true}
 	flow.AddItem(list)
 
 	var input *ItemData
 	if withInput {
-		input = &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true, Scrollable: true}
-		row := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_HORIZONTAL, Fixed: true}
+		input = &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true, Scrollable: true}
+		row := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_HORIZONTAL, Fixed: true}
 		row.AddItem(input)
 		flow.AddItem(row)
 	}
@@ -145,11 +147,14 @@ func NewTextWindow(title string, hz HZone, vz VZone, withInput bool) (*WindowDat
 // SizeTextWindowList fits a scrolling list below any fixed sibling rows, such
 // as the docked toolbar. Those rows occupy part of the window's client area and
 // must not be included in the list's viewport height.
-func SizeTextWindowList(list *ItemData, clientW, clientH float32) {
+func (ctx *Context) SizeTextWindowList(list *ItemData, clientW, clientH float32) {
+	ctx.mustAlive()
+	ctx.requireItem(list)
+
 	if list == nil {
 		return
 	}
-	scale := UIScale()
+	scale := ctx.UIScale()
 	if scale <= 0 {
 		scale = 1
 	}
@@ -174,7 +179,12 @@ func SizeTextWindowList(list *ItemData, clientW, clientH float32) {
 // UpdateTextWindow updates only rows at or after firstChanged when the
 // width and font configuration is stable. Earlier rows retain their measured
 // layout and rendered content.
-func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, options TextWindowOptions, wrapCache *TextWindowWrapCache) {
+func (ctx *Context) UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, options TextWindowOptions, wrapCache *TextWindowWrapCache) {
+	ctx.mustAlive()
+	ctx.requireWindow(win)
+	ctx.requireItem(list)
+	ctx.requireItem(input)
+
 	fontSize, inputMsg := options.FontSize, options.InputText
 	faceSrc, alternateRows, firstChanged := options.FontSource, options.AlternateRows, options.FirstChanged
 	if wrapCache == nil {
@@ -189,7 +199,7 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 	clientW := win.GetSize().X
 	clientH := win.GetSize().Y - win.GetTitleSize()
 	// Adjust for window padding/border so child flows fit within clip region.
-	s := UIScale()
+	s := ctx.UIScale()
 	if win.NoScale {
 		s = 1
 	}
@@ -205,7 +215,7 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 
 	// Compute a row height from actual font metrics (ascent+descent) to
 	// avoid clipping at large sizes. Convert pixels to item units.
-	ui := UIScale()
+	ui := ctx.UIScale()
 	if ui <= 0 {
 		ui = 1
 	}
@@ -215,7 +225,7 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 	facePx := float64(float32(fontSize)*ui) + 2
 	resolvedFaceSrc := faceSrc
 	if resolvedFaceSrc == nil {
-		resolvedFaceSrc = FontSource()
+		resolvedFaceSrc = ctx.FontSource()
 	}
 	goFace := &text.GoTextFace{Source: resolvedFaceSrc, Size: facePx}
 	var face text.Face = goFace
@@ -230,7 +240,7 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 	// Reserve a gutter for the vertical scrollbar so wrapped text and
 	// hitboxes never encroach beneath it. This applies broadly to chat,
 	// console, help, and about windows using this helper.
-	sb := ScrollbarWidth()
+	sb := ctx.ScrollbarWidth()
 	contentW := clientWAvail - sb
 	if contentW < 0 {
 		contentW = 0
@@ -265,17 +275,17 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 			list.Contents[i].Size.X = contentWUnits
 			list.Contents[i].SelectableText = true
 			list.Contents[i].Filled = alternateRows && i%2 == 1
-			list.Contents[i].Color = SubtleAlternateRowColor()
+			list.Contents[i].Color = ctx.SubtleAlternateRowColor()
 			list.Contents[i].OnURLClick = options.OnURLClick
 		} else {
-			t, _ := NewText()
+			t, _ := ctx.NewText()
 			t.Text = wrapped
 			t.FontSize = float32(fontSize)
 			t.Face = face
 			t.Size = Point{X: contentWUnits, Y: rowUnits * float32(linesN)}
 			t.SelectableText = true
 			t.Filled = alternateRows && i%2 == 1
-			t.Color = SubtleAlternateRowColor()
+			t.Color = ctx.SubtleAlternateRowColor()
 			t.OnURLClick = options.OnURLClick
 			// Append to maintain ordering with the msgs index
 			list.AddItem(t)
@@ -310,7 +320,7 @@ func UpdateTextWindow(win *WindowData, list, input *ItemData, msgs []string, opt
 		}
 		inputWidth := max(0, contentWUnits-actionWidth)
 		if len(input.Contents) == 0 {
-			t, _ := NewText()
+			t, _ := ctx.NewText()
 			t.Filled = true
 			input.AddItem(t)
 		}

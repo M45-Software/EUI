@@ -3,6 +3,8 @@ package eui
 import "github.com/hajimehoshi/ebiten/v2"
 
 func (item *itemData) editScrollbar(part dragType, offset, size point) (track, thumb rect, limit float32) {
+	ctx := item.ui()
+
 	viewport, vertical, horizontal := item.editScrollGeometry(offset, size)
 	layout, state := item.editLayout(), item.editor()
 	track = vertical
@@ -16,7 +18,7 @@ func (item *itemData) editScrollbar(part dragType, offset, size point) (track, t
 	}
 	limit = max(0, content-length)
 	thumb = track
-	thumbLength := scrollbarThumbLength(length, content, uiScale)
+	thumbLength := scrollbarThumbLength(length, content, ctx.uiScale)
 	position := float32(0)
 	if limit > 0 {
 		position = min(max(0, scroll), limit) / limit * (length - thumbLength)

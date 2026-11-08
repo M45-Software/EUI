@@ -12,15 +12,17 @@ import (
 
 // Run alone because Ebitengine permits one RunGame call per process.
 func TestTooltipPreservesButtonCaptionPixels(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_TOOLTIP_RENDER_TEST") == "" {
 		t.Skip("set EUI_TOOLTIP_RENDER_TEST=1 for pixel comparison")
 	}
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	previousScale := uiScale
-	t.Cleanup(func() { uiScale = previousScale })
-	g := &tooltipRenderGame{}
+	previousScale := ctx.uiScale
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	g := &tooltipRenderGame{ctx: ctx}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +32,8 @@ func TestTooltipPreservesButtonCaptionPixels(t *testing.T) {
 }
 
 type tooltipRenderGame struct {
+	ctx *Context
+
 	done bool
 	err  error
 }
@@ -42,6 +46,8 @@ func (g *tooltipRenderGame) Update() error {
 }
 func (g *tooltipRenderGame) Layout(_, _ int) (int, int) { return 1400, 100 }
 func (g *tooltipRenderGame) Draw(_ *ebiten.Image) {
+	ctx := g.ctx
+
 	if g.done {
 		return
 	}
@@ -50,12 +56,12 @@ func (g *tooltipRenderGame) Draw(_ *ebiten.Image) {
 	icon.Fill(color.White)
 	defer icon.Deallocate()
 	for _, scale := range []float32{1, 1.3, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		for _, caption := range []string{"Open User Data Folder", "Open Diagnostics Folder", "File Paths"} {
 			for _, leadingIcon := range []*ebiten.Image{nil, icon} {
-				win := NewWindow()
+				win := ctx.NewWindow()
 				win.ShowTooltipIndicators = true
-				button, _ := NewButton()
+				button, _ := ctx.NewButton()
 				button.Text, button.FontSize = caption, 12
 				button.Image = leadingIcon
 				button.Filled, button.Outlined = false, false

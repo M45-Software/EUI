@@ -23,7 +23,7 @@ func (item *itemData) SetTextColorSwatches(provider TextHighlighter, click func(
 }
 
 func (item *itemData) textSwatches() []TextColorSpan {
-	if item.textSwatchProvider == nil || item.Disabled || item.HideText {
+	if item.textSwatchProvider == nil || item.isDisabled() || item.HideText {
 		return nil
 	}
 	state := item.editor()
@@ -97,6 +97,8 @@ func (item *itemData) textSwatchAt(mpos point) (TextColorSpan, bool) {
 }
 
 func (item *itemData) drawTextSwatches(dst *ebiten.Image, line editTextLine, layout *editTextLayout, origin point, y float32) {
+	ctx := item.ui()
+
 	for _, span := range item.textSwatches() {
 		if span.Start < line.start || span.End > line.start+line.length || !item.textSwatchVisible(span) {
 			continue
@@ -117,6 +119,6 @@ func (item *itemData) drawTextSwatches(dst *ebiten.Image, line editTextLine, lay
 				drawFilledRect(dst, left, top, min(cell, r.X1-left), min(cell, r.Y1-top), color, false)
 			}
 		}
-		strokeRect(dst, r.X0, r.Y0, r.X1-r.X0, r.Y1-r.Y0, max(1, uiScale), NewColor(140, 140, 140, 255), false)
+		ctx.strokeRect(dst, r.X0, r.Y0, r.X1-r.X0, r.Y1-r.Y0, max(1, ctx.uiScale), NewColor(140, 140, 140, 255), false)
 	}
 }

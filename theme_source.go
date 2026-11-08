@@ -30,8 +30,10 @@ func themeSourceText(data []byte) []byte {
 }
 
 // ValidateThemeSource checks a palette without changing the active theme.
-func ValidateThemeSource(data []byte) error {
-	_, _, _, err := decodeThemeSource(data)
+func (ctx *Context) ValidateThemeSource(data []byte) error {
+	ctx.mustAlive()
+
+	_, _, _, err := ctx.decodeThemeSource(data)
 	return err
 }
 
@@ -48,7 +50,9 @@ func ValidateStyleSource(data []byte) error {
 // EditableThemeFile returns a user palette/style file. For a bundled choice,
 // it creates an editable override from the original JSON, preserving references
 // to named colors. Existing user files are never overwritten.
-func EditableThemeFile(name string, style bool) (string, error) {
+func (ctx *Context) EditableThemeFile(name string, style bool) (string, error) {
+	ctx.mustAlive()
+
 	if name == "" || strings.TrimSpace(name) != name || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return "", fmt.Errorf("invalid theme name")
 	}
@@ -56,7 +60,7 @@ func EditableThemeFile(name string, style bool) (string, error) {
 	if style {
 		group = "styles"
 	}
-	filename := filepath.Join(themeDirectory, group, name+".json")
+	filename := filepath.Join(ctx.themeDirectory, group, name+".json")
 	if info, err := os.Stat(filename); err == nil {
 		if !info.Mode().IsRegular() {
 			return "", fmt.Errorf("theme path is not a regular file")

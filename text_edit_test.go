@@ -13,28 +13,30 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
-func editingFixture(t *testing.T, value string, multiline bool) *ItemData {
+func (ctx *Context) editingFixture(t *testing.T, value string, multiline bool) *ItemData {
 	t.Helper()
-	oldFocus, oldSelection, oldTime, oldScale, oldShift := focusedItem, selectedTextItem, updateNow, uiScale, ShiftPressed
-	oldSearch := activeSearch
+	oldFocus, oldSelection, oldTime, oldScale, oldShift := ctx.focusedItem, ctx.selectedTextItem, ctx.updateNow, ctx.uiScale, ctx.ShiftPressed
+	oldSearch := ctx.activeSearch
 	t.Cleanup(func() {
-		focusedItem, selectedTextItem, updateNow, uiScale, ShiftPressed = oldFocus, oldSelection, oldTime, oldScale, oldShift
-		activeSearch = oldSearch
+		ctx.focusedItem, ctx.selectedTextItem, ctx.updateNow, ctx.uiScale, ctx.ShiftPressed = oldFocus, oldSelection, oldTime, oldScale, oldShift
+		ctx.activeSearch = oldSearch
 	})
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	uiScale, ShiftPressed, updateNow = 1, false, time.Unix(100, 0)
-	item, _ := NewInput()
+	ctx.uiScale, ctx.ShiftPressed, ctx.updateNow = 1, false, time.Unix(100, 0)
+	item, _ := ctx.NewInput()
 	item.Text, item.Multiline = value, multiline
 	item.Size = point{X: 240, Y: 90}
 	item.DrawRect = rect{X0: 40, Y0: 60, X1: 280, Y1: 150}
-	Focus(item)
+	ctx.Focus(item)
 	return item
 }
 
 func TestTextEditingSelectionReplacementAndHistory(t *testing.T) {
-	item := editingFixture(t, "hello world", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "hello world", false)
 	events := 0
 	item.Handler.Handle = func(e UIEvent) {
 		if e.Type == EventInputChanged {
@@ -57,7 +59,9 @@ func TestTextEditingSelectionReplacementAndHistory(t *testing.T) {
 }
 
 func TestTextEditingReplaceTextIsOneUndoableEdit(t *testing.T) {
-	item := editingFixture(t, "before", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "before", true)
 	item.editSelect(6, 6)
 	item.editInsert("!", "typing")
 	item.editSelect(1, 4)
@@ -93,7 +97,9 @@ func TestTextEditingReplaceTextIsOneUndoableEdit(t *testing.T) {
 }
 
 func TestTextEditingPublicHistoryActions(t *testing.T) {
-	item := editingFixture(t, "start", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "start", true)
 	if item.CanUndo() || item.CanRedo() {
 		t.Fatal("new document has history")
 	}
@@ -132,9 +138,11 @@ func TestTextEditingPublicHistoryActions(t *testing.T) {
 }
 
 func TestTextEditingGroupsTypingAndBreaksOnMovement(t *testing.T) {
-	item := editingFixture(t, "", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "", false)
 	item.editInsert("a", "typing")
-	updateNow = updateNow.Add(100 * time.Millisecond)
+	ctx.updateNow = ctx.updateNow.Add(100 * time.Millisecond)
 	item.editInsert("b", "typing")
 	item.editKey(ebiten.KeyArrowLeft, inputkeys.Modifiers{}, false)
 	item.editInsert("X", "typing")
@@ -160,9 +168,11 @@ func TestTextEditingGroupsTypingAndBreaksOnMovement(t *testing.T) {
 }
 
 func TestTextEditingDeletesGraphemesAndSelection(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, value := range []string{"é", "e\u0301", "👩‍💻", "🇺🇸"} {
 		t.Run(value, func(t *testing.T) {
-			item := editingFixture(t, "A"+value+"B", false)
+			item := ctx.editingFixture(t, "A"+value+"B", false)
 			item.editMove(1, false)
 			item.editKey(ebiten.KeyDelete, inputkeys.Modifiers{}, false)
 			if item.Text != "AB" {
@@ -184,6 +194,8 @@ func TestTextEditingDeletesGraphemesAndSelection(t *testing.T) {
 }
 
 func TestTextEditingPlatformNavigationAndSelection(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, tc := range []struct {
 		name string
 		mods inputkeys.Modifiers
@@ -191,7 +203,7 @@ func TestTextEditingPlatformNavigationAndSelection(t *testing.T) {
 		{"Control", inputkeys.Modifiers{Control: true}}, {"Command", inputkeys.Modifiers{Mac: true, Meta: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			item := editingFixture(t, "first\nsecond", true)
+			item := ctx.editingFixture(t, "first\nsecond", true)
 			item.editKey(ebiten.KeyA, tc.mods, false)
 			if item.SelectedText() != item.Text {
 				t.Fatal("select all")
@@ -210,7 +222,7 @@ func TestTextEditingPlatformNavigationAndSelection(t *testing.T) {
 			}
 		})
 	}
-	item := editingFixture(t, "one two three", false)
+	item := ctx.editingFixture(t, "one two three", false)
 	item.editMove(0, false)
 	item.editKey(ebiten.KeyArrowRight, inputkeys.Modifiers{Control: true}, false)
 	if item.CursorPos != 4 {
@@ -232,7 +244,9 @@ func TestTextEditingPlatformNavigationAndSelection(t *testing.T) {
 }
 
 func TestTextEditingSingleLineAndMultilinePolicy(t *testing.T) {
-	item := editingFixture(t, "", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "", false)
 	if item.editKey(ebiten.KeyEnter, inputkeys.Modifiers{}, false) || item.editKey(ebiten.KeyTab, inputkeys.Modifiers{}, false) {
 		t.Fatal("single line consumed submit or focus traversal")
 	}
@@ -253,7 +267,9 @@ func TestTextEditingSingleLineAndMultilinePolicy(t *testing.T) {
 }
 
 func TestTextEditingIndentAndUndo(t *testing.T) {
-	item := editingFixture(t, "one\ntwo\nthree", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "one\ntwo\nthree", true)
 	item.AcceptTab = true
 	item.editSelect(0, 8)
 	item.editKey(ebiten.KeyTab, inputkeys.Modifiers{}, false)
@@ -271,7 +287,9 @@ func TestTextEditingIndentAndUndo(t *testing.T) {
 }
 
 func TestTextEditingPasswordAndDisabled(t *testing.T) {
-	item := editingFixture(t, "******", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "******", false)
 	secret := "secret"
 	item.HideText, item.SecretText, item.TextPtr = true, secret, &secret
 	item.editSelect(0, 6)
@@ -293,13 +311,15 @@ func TestTextEditingPasswordAndDisabled(t *testing.T) {
 }
 
 func TestTextEditingClickLayoutWithPaddingScaleTabsAndScroll(t *testing.T) {
-	item := editingFixture(t, "\talpha\nsecond\nthird", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "\talpha\nsecond\nthird", true)
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		item.textDrawOrigin, item.textDrawSize = point{X: 40, Y: 60}, point{X: 240, Y: 90}
 		item.editor().scroll = point{X: 7, Y: 4}
 		layout := item.editLayout()
-		pad := (item.BorderPad + item.Padding + currentStyle.TextPadding) * scale
+		pad := (item.BorderPad + item.Padding + ctx.currentStyle.TextPadding) * scale
 		// Click after the tab and 'a' using the engine's actual shaped advance.
 		x := float32(text.AdvanceAt("    alpha", 5, layout.face))
 		pos := item.editCursorAt(point{X: 40 + pad + x - 7, Y: 60 + pad + layout.lineHeight/2 - 4})
@@ -315,7 +335,9 @@ func TestTextEditingClickLayoutWithPaddingScaleTabsAndScroll(t *testing.T) {
 }
 
 func TestTextEditingVerticalMovementPreservesColumn(t *testing.T) {
-	item := editingFixture(t, "abcdefgh\nx\nabcdefgh", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "abcdefgh\nx\nabcdefgh", true)
 	item.editMove(6, false)
 	item.editKey(ebiten.KeyArrowDown, inputkeys.Modifiers{}, false)
 	if item.CursorPos != 10 {
@@ -328,7 +350,9 @@ func TestTextEditingVerticalMovementPreservesColumn(t *testing.T) {
 }
 
 func TestTextEditingCaretFollowsAndBlinks(t *testing.T) {
-	item := editingFixture(t, strings.Repeat("long line here\n", 30)+strings.Repeat("W", 90), true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, strings.Repeat("long line here\n", 30)+strings.Repeat("W", 90), true)
 	viewport, _ := item.editGeometry()
 	item.followEditCaret(viewport)
 	s := item.editor()
@@ -341,7 +365,7 @@ func TestTextEditingCaretFollowsAndBlinks(t *testing.T) {
 		t.Fatal("home did not scroll to start", s.scroll)
 	}
 	item.Dirty = false
-	item.updateCaretBlink(updateNow.Add(600 * time.Millisecond))
+	item.updateCaretBlink(ctx.updateNow.Add(600 * time.Millisecond))
 	if s.caretOn || !item.Dirty {
 		t.Fatal("blink did not invalidate rendering")
 	}
@@ -352,7 +376,9 @@ func TestTextEditingCaretFollowsAndBlinks(t *testing.T) {
 }
 
 func TestTextEditingClickShiftAndWordSelection(t *testing.T) {
-	item := editingFixture(t, "hello world", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "hello world", false)
 	_, origin := item.editGeometry()
 	face := item.editLayout().face
 	at := func(pos int) point {
@@ -366,9 +392,9 @@ func TestTextEditingClickShiftAndWordSelection(t *testing.T) {
 	if item.SelectedText() != "llo wo" {
 		t.Fatal(item.SelectedText())
 	}
-	updateNow = updateNow.Add(time.Second)
+	ctx.updateNow = ctx.updateNow.Add(time.Second)
 	item.clickEditableText(at(7), false)
-	updateNow = updateNow.Add(100 * time.Millisecond)
+	ctx.updateNow = ctx.updateNow.Add(100 * time.Millisecond)
 	item.clickEditableText(at(7), false)
 	if item.SelectedText() != "world" {
 		t.Fatal("double click", item.SelectedText())
@@ -376,7 +402,9 @@ func TestTextEditingClickShiftAndWordSelection(t *testing.T) {
 }
 
 func TestTextEditingCutIsAtomic(t *testing.T) {
-	item := editingFixture(t, "keep this text", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "keep this text", false)
 	item.editSelect(5, 9)
 	item.editCut(func(string) error { return fmt.Errorf("clipboard unavailable") })
 	if item.Text != "keep this text" || item.SelectedText() != "this" {
@@ -394,12 +422,14 @@ func TestTextEditingCutIsAtomic(t *testing.T) {
 }
 
 func TestTextEditingWordSelectionSurvivesHeldMouse(t *testing.T) {
-	item := editingFixture(t, "hello world", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "hello world", false)
 	_, origin := item.editGeometry()
 	face := item.editLayout().face
 	p := point{X: origin.X + float32(text.AdvanceAt(item.Text, 7, face)), Y: origin.Y + 2}
 	item.clickEditableText(p, false)
-	updateNow = updateNow.Add(100 * time.Millisecond)
+	ctx.updateNow = ctx.updateNow.Add(100 * time.Millisecond)
 	item.clickEditableText(p, false)
 	item.dragEditableText(p)
 	if item.SelectedText() != "world" {
@@ -408,7 +438,9 @@ func TestTextEditingWordSelectionSurvivesHeldMouse(t *testing.T) {
 }
 
 func TestTextEditingExternalOwnerKeepsKeyboardControl(t *testing.T) {
-	item := editingFixture(t, "app-owned", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "app-owned", true)
 	item.ExternalTextEditing = true
 	for _, key := range []ebiten.Key{ebiten.KeyDelete, ebiten.KeyEnter, ebiten.KeyZ, ebiten.KeyA} {
 		if item.editKey(key, inputkeys.Modifiers{Control: true}, false) {
@@ -421,9 +453,11 @@ func TestTextEditingExternalOwnerKeepsKeyboardControl(t *testing.T) {
 }
 
 func TestTextEditingSmallFieldKeepsFullLine(t *testing.T) {
-	item := editingFixture(t, "Normal text", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "Normal text", false)
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		item.Padding = 12
 		size := point{X: 240 * scale, Y: 24 * scale}
 		viewport := item.editViewport(point{}, size)
@@ -434,7 +468,9 @@ func TestTextEditingSmallFieldKeepsFullLine(t *testing.T) {
 }
 
 func TestTextEditingExternalInputUsesDrawnCaretPosition(t *testing.T) {
-	item := editingFixture(t, "hello world", false)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "hello world", false)
 	item.ExternalTextEditing = true
 	_, origin := item.editGeometry()
 	x := float32(text.AdvanceAt(item.Text, 6, item.editLayout().face))
@@ -444,23 +480,25 @@ func TestTextEditingExternalInputUsesDrawnCaretPosition(t *testing.T) {
 }
 
 func TestFocusedTextInputRejectsUnavailableControls(t *testing.T) {
-	item := editingFixture(t, "draft", true)
-	if FocusedTextInput() != item {
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "draft", true)
+	if ctx.FocusedTextInput() != item {
 		t.Fatal("focused editor not reported")
 	}
 	item.Disabled = true
-	if FocusedTextInput() != nil {
+	if ctx.FocusedTextInput() != nil {
 		t.Fatal("disabled input captured keyboard")
 	}
 	item.Disabled = false
 	item.Invisible = true
-	if FocusedTextInput() != nil {
+	if ctx.FocusedTextInput() != nil {
 		t.Fatal("hidden input captured keyboard")
 	}
 	item.Invisible = false
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.AddItem(item)
-	if FocusedTextInput() != nil {
+	if ctx.FocusedTextInput() != nil {
 		t.Fatal("closed window captured keyboard")
 	}
 }

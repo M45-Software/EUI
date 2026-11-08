@@ -46,7 +46,7 @@ func (item *itemData) RefreshTextHighlighting() {
 }
 
 func (item *itemData) textHighlights() []TextColorSpan {
-	if item.textHighlighter == nil || item.HideText || item.Disabled {
+	if item.textHighlighter == nil || item.HideText || item.isDisabled() {
 		return nil
 	}
 	s := item.editor()

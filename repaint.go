@@ -16,11 +16,12 @@ type RepaintStats struct {
 }
 
 // RepaintObserver is optional and runs on the UI thread after a cache repaint.
-var RepaintObserver func(RepaintStats)
 
-func WindowRepaintStats() []RepaintStats {
-	stats := make([]RepaintStats, 0, len(windows))
-	for _, win := range windows {
+func (ctx *Context) WindowRepaintStats() []RepaintStats {
+	ctx.mustAlive()
+
+	stats := make([]RepaintStats, 0, len(ctx.windows))
+	for _, win := range ctx.windows {
 		s := win.repaintStats
 		s.Title = win.Title
 		stats = append(stats, s)
@@ -53,6 +54,8 @@ func (win *windowData) shouldDeferRepaint(now time.Time, urgent bool, spent *int
 }
 
 func (win *windowData) recordRepaint(start time.Time, pixels int) {
+	ctx := win.ui()
+
 	s := &win.repaintStats
 	s.Title = win.Title
 	s.Count++
@@ -65,7 +68,7 @@ func (win *windowData) recordRepaint(start time.Time, pixels int) {
 	}
 	win.repaintRequested = time.Time{}
 	win.repaintReason = ""
-	if RepaintObserver != nil {
-		RepaintObserver(*s)
+	if ctx.RepaintObserver != nil {
+		ctx.RepaintObserver(*s)
 	}
 }

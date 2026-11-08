@@ -9,11 +9,18 @@ import (
 
 // Add window to window list
 func (target *windowData) AddWindow(toBack bool) {
-	for _, win := range windows {
+	ctx := target.ui()
+
+	for _, win := range ctx.windows {
 		if win == target {
 			log.Println("Window already exists")
 			return
 		}
+	}
+
+	if target.keyboardOrder == 0 {
+		ctx.windowFocusSerial++
+		target.keyboardOrder = ctx.windowFocusSerial
 	}
 
 	if target.AutoSize {
@@ -31,75 +38,106 @@ func (target *windowData) AddWindow(toBack bool) {
 	}
 
 	if target.AlwaysDrawFirst {
-		windows = append([]*windowData{target}, windows...)
+		ctx.windows = append([]*windowData{target}, ctx.windows...)
 		return
 	}
 
 	if !toBack {
-		windows = append(windows, target)
+		ctx.windows = append(ctx.windows, target)
 	} else {
 		idx := 0
-		for idx < len(windows) && windows[idx].AlwaysDrawFirst {
+		for idx < len(ctx.windows) && ctx.windows[idx].AlwaysDrawFirst {
 			idx++
 		}
-		windows = append(windows[:idx], append([]*windowData{target}, windows[idx:]...)...)
+		ctx.windows = append(ctx.windows[:idx], append([]*windowData{target}, ctx.windows[idx:]...)...)
 	}
 }
 
 // deallocate releases cached render images for the window and its items.
 func (target *windowData) deallocate() {
+	ctx := target.ui()
+
+	target.releaseOwnImages()
+	if target.searchInput != nil {
+		target.searchInput.deallocate()
+	}
+	for _, item := range target.Contents {
+		if item == nil || item.ctx != ctx {
+			continue
+		}
+		item.deallocate()
+	}
+}
+
+func (target *windowData) releaseOwnImages() {
+	ctx := target.ui()
 	if target.Render != nil {
-		releaseUIRenderTarget(target.Render)
+		ctx.releaseUIRenderTarget(target.Render)
 		target.Render = nil
 	}
 	if target.titleRender != nil {
-		releaseUIRenderTarget(target.titleRender)
+		ctx.releaseUIRenderTarget(target.titleRender)
 		target.titleRender = nil
 		target.titleRenderValid = false
-	}
-	for _, item := range target.Contents {
-		item.deallocate()
 	}
 }
 
 // deallocate releases cached render images for the item and its children.
 func (item *itemData) deallocate() {
+	ctx := item.ui()
+
 	if item == nil {
 		return
 	}
-	if item.ItemType == ITEM_COLORWHEEL && item.Image != nil {
-		releaseUIRenderTarget(item.Image)
-		item.Image = nil
-	}
-	if item.Render != nil {
-		releaseUIRenderTarget(item.Render)
-		item.Render = nil
-	}
+	item.releaseOwnImages()
 	for _, child := range item.Contents {
+		if child == nil || child.ctx != ctx {
+			continue
+		}
 		child.deallocate()
 	}
 	for _, tab := range item.Tabs {
+		if tab == nil || tab.ctx != ctx {
+			continue
+		}
 		tab.deallocate()
+	}
+}
+
+func (item *itemData) releaseOwnImages() {
+	ctx := item.ui()
+	if item.ItemType == ITEM_COLORWHEEL && item.Image != nil {
+		ctx.releaseUIRenderTarget(item.Image)
+		item.Image = nil
+	}
+	if item.Render != nil {
+		ctx.releaseUIRenderTarget(item.Render)
+		item.Render = nil
 	}
 }
 
 // clearInteraction retires input state before callbacks can open other windows.
 func (target *windowData) clearInteraction() {
+	ctx := target.ui()
+
+	if target.searchInput != nil {
+		target.searchInput.clearHiddenState()
+	}
 	for _, item := range target.Contents {
 		item.clearHiddenState()
 	}
-	if activeSearch == target {
-		activeSearch = nil
+	if ctx.activeSearch == target {
+		ctx.activeSearch = nil
 	}
 	target.searchOpen = false
-	if dragWin == target {
-		dragWin, dragFlow, dragPart = nil, nil, PART_NONE
+	if ctx.dragWin == target {
+		ctx.dragWin, ctx.dragFlow, ctx.dragPart = nil, nil, PART_NONE
 	}
-	if activeWindow == target {
-		activeWindow = nil
-		for i := len(windows) - 1; i >= 0; i-- {
-			if windows[i] != target && windows[i].Open {
-				activeWindow = windows[i]
+	if ctx.activeWindow == target {
+		ctx.activeWindow = nil
+		for i := len(ctx.windows) - 1; i >= 0; i-- {
+			if ctx.windows[i] != target && ctx.windows[i].Open {
+				ctx.activeWindow = ctx.windows[i]
 				break
 			}
 		}
@@ -109,10 +147,12 @@ func (target *windowData) clearInteraction() {
 // RemoveWindow removes a window from the active list. Any cached images
 // belonging to the window are disposed and pointers cleared.
 func (target *windowData) RemoveWindow() {
-	for i, win := range windows {
+	ctx := target.ui()
+
+	for i, win := range ctx.windows {
 		if win == target { // Compare pointers
 			win.clearInteraction()
-			windows = append(windows[:i], windows[i+1:]...)
+			ctx.windows = append(ctx.windows[:i], ctx.windows[i+1:]...)
 			win.deallocate()
 			win.Open = false
 			return
@@ -123,11 +163,14 @@ func (target *windowData) RemoveWindow() {
 }
 
 // Create a new window from the default theme
-func NewWindow() *windowData {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewWindow() *windowData {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newWindow := currentTheme.Window
+	newWindow := ctx.currentTheme.Window
+	newWindow.ctx = ctx
 	// Window colors are theme values unless the caller explicitly overrides
 	// them. Leaving the copied values here freezes the palette that was active
 	// when the window was created.
@@ -136,11 +179,13 @@ func NewWindow() *windowData {
 	newWindow.BorderColor = Color{}
 	// Default: windows can be maximized if desired by the app
 	newWindow.Maximizable = false
-	newWindow.Theme = currentTheme
-	return &newWindow
+	newWindow.Theme = ctx.currentTheme
+	return ctx.registerWindow(&newWindow)
 }
 
 func (win *windowData) backgroundColor() Color {
+	ctx := win.ui()
+
 	if win == nil {
 		return Color{}
 	}
@@ -150,8 +195,8 @@ func (win *windowData) backgroundColor() Color {
 	if win.Theme != nil {
 		return win.Theme.Window.BGColor
 	}
-	if currentTheme != nil {
-		return currentTheme.Window.BGColor
+	if ctx.currentTheme != nil {
+		return ctx.currentTheme.Window.BGColor
 	}
 	return baseTheme.Window.BGColor
 }
@@ -163,6 +208,8 @@ func (win *windowData) BackgroundColor() Color {
 }
 
 func (win *windowData) titleBackgroundColor() Color {
+	ctx := win.ui()
+
 	if win == nil {
 		return Color{}
 	}
@@ -172,8 +219,8 @@ func (win *windowData) titleBackgroundColor() Color {
 	if win.Theme != nil {
 		return win.Theme.Window.TitleBGColor
 	}
-	if currentTheme != nil {
-		return currentTheme.Window.TitleBGColor
+	if ctx.currentTheme != nil {
+		return ctx.currentTheme.Window.TitleBGColor
 	}
 	return baseTheme.Window.TitleBGColor
 }
@@ -189,56 +236,70 @@ func (win *windowData) backgroundTint(c Color) Color {
 
 // Maximize resizes this window to cover the full screen area and moves it to (0,0).
 func (win *windowData) Maximize() {
+	ctx := win.ui()
+
 	if win == nil {
 		return
 	}
 	win.ClearZone()
 	_ = win.SetPos(Point{X: 0, Y: 0})
-	_ = win.SetSize(Point{X: float32(screenWidth), Y: float32(screenHeight)})
+	_ = win.SetSize(Point{X: float32(ctx.screenWidth), Y: float32(ctx.screenHeight)})
 }
 
 // Create a new button from the default theme
-func NewButton() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewButton() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Button
+	newItem := ctx.currentTheme.Button
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new button from the default theme
-func NewCheckbox() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewCheckbox() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Checkbox
+	newItem := ctx.currentTheme.Checkbox
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new radio button from the default theme
-func NewRadio() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewRadio() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Radio
+	newItem := ctx.currentTheme.Radio
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new input box from the default theme
-func NewInput() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewInput() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Input
+	newItem := ctx.currentTheme.Input
+	newItem.ctx = ctx
 	newItem.SelectableText = true
 	if newItem.TextPtr == nil {
 		newItem.TextPtr = &newItem.Text
@@ -247,169 +308,197 @@ func NewInput() (*itemData, *EventHandler) {
 	}
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // NewTextArea creates a bounded, multiline text input with horizontal and
 // vertical scrolling. Text is not soft-wrapped. Set AcceptTab for code editing.
-func NewTextArea() (*itemData, *EventHandler) {
-	item, events := NewInput()
+func (ctx *Context) NewTextArea() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	item, events := ctx.NewInput()
 	item.Multiline = true
 	item.Size = Point{X: 360, Y: 180}
 	return item, events
 }
 
 // Create a new slider from the default theme
-func NewSlider() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewSlider() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Slider
+	newItem := ctx.currentTheme.Slider
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new dropdown from the default theme
-func NewDropdown() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewDropdown() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Dropdown
+	newItem := ctx.currentTheme.Dropdown
+	newItem.ctx = ctx
+	newItem.HoverIndex = -1
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new color wheel from the default theme
-func NewColorWheel() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewColorWheel() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
 	newItem := baseColorWheel
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new image item with a new image buffer
-func NewImageItem(w, h int) (*itemData, *ebiten.Image) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewImageItem(w, h int) (*itemData, *ebiten.Image) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := itemData{
+	newItem := itemData{ctx: ctx,
 		ItemType: ITEM_IMAGE,
 		Size:     point{X: float32(w), Y: float32(h)},
-		Theme:    currentTheme,
+		Theme:    ctx.currentTheme,
 	}
-	newItem.Image = newManagedImage(w, h)
-	return &newItem, newItem.Image
+	newItem.Image = ctx.newManagedImage(w, h)
+	return ctx.registerItem(&newItem), newItem.Image
 }
 
 // NewImageReferenceItem creates an image item without allocating a backing
 // render target. Use it when the image will be supplied later or borrowed from
 // a stable cache.
-func NewImageReferenceItem(w, h int) *itemData {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewImageReferenceItem(w, h int) *itemData {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	return &itemData{
+	return ctx.registerItem(&itemData{ctx: ctx,
 		ItemType: ITEM_IMAGE,
 		Size:     point{X: float32(w), Y: float32(h)},
-		Theme:    currentTheme,
-	}
+		Theme:    ctx.currentTheme,
+	})
 }
 
 // Create a new image item with a new image buffer
-func NewImageFastItem(w, h int) (*itemData, *ebiten.Image) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewImageFastItem(w, h int) (*itemData, *ebiten.Image) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := itemData{
+	newItem := itemData{ctx: ctx,
 		ItemType: ITEM_IMAGE_FAST,
 		Size:     point{X: float32(w), Y: float32(h)},
-		Theme:    currentTheme,
+		Theme:    ctx.currentTheme,
 	}
-	newItem.Image = newUnmanagedImage(w, h)
-	return &newItem, newItem.Image
+	newItem.Image = ctx.newUnmanagedImage(w, h)
+	return ctx.registerItem(&newItem), newItem.Image
 }
 
 // Create a new textbox from the default theme
-func NewText() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewText() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Text
+	newItem := ctx.currentTheme.Text
+	newItem.ctx = ctx
 	// Ensure a default text face is available immediately for code that
 	// queries metrics without drawing first.
 	if newItem.Face == nil {
 		// Face is public and callers may mutate it. Keep EUI's shared faces
 		// private so their measured text can be cached safely.
-		face := *textFace(newItem.FontSize)
+		face := *ctx.textFace(newItem.FontSize)
 		newItem.Face = &face
 	}
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Create a new progress bar from the default theme
-func NewProgressBar() (*itemData, *EventHandler) {
-	if currentTheme == nil {
-		currentTheme = baseTheme
+func (ctx *Context) NewProgressBar() (*itemData, *EventHandler) {
+	ctx.mustAlive()
+
+	if ctx.currentTheme == nil {
+		ctx.currentTheme = ctx.baseThemeCopy()
 	}
-	newItem := currentTheme.Progress
+	newItem := ctx.currentTheme.Progress
+	newItem.ctx = ctx
 	h := newHandler()
 	newItem.Handler = h
-	newItem.Theme = currentTheme
-	return &newItem, h
+	newItem.Theme = ctx.currentTheme
+	return ctx.registerItem(&newItem), h
 }
 
 // Bring a window to the front
 func (target *windowData) BringForward() {
+	ctx := target.ui()
+
 	if target.AlwaysDrawFirst {
 		// Background windows stay behind ordinary UI, but multiple background
 		// windows still need normal front-to-back behavior among themselves.
-		for index, win := range windows {
+		for index, win := range ctx.windows {
 			if win != target {
 				continue
 			}
 			front := index
-			for front+1 < len(windows) && windows[front+1].AlwaysDrawFirst {
+			for front+1 < len(ctx.windows) && ctx.windows[front+1].AlwaysDrawFirst {
 				front++
 			}
 			if front != index {
-				copy(windows[index:front], windows[index+1:front+1])
-				windows[front] = target
+				copy(ctx.windows[index:front], ctx.windows[index+1:front+1])
+				ctx.windows[front] = target
 			}
-			activeWindow = target
+			ctx.activeWindow = target
 			return
 		}
 		return
 	}
-	for w, win := range windows {
+	for w, win := range ctx.windows {
 		if win == target {
-			windows = append(windows[:w], windows[w+1:]...)
-			windows = append(windows, target)
-			activeWindow = target
+			ctx.windows = append(ctx.windows[:w], ctx.windows[w+1:]...)
+			ctx.windows = append(ctx.windows, target)
+			ctx.activeWindow = target
 		}
 	}
 }
 
 // MarkOpen sets the window to open and brings it forward if necessary.
 func (target *windowData) MarkOpen() {
+	ctx := target.ui()
+
 	wasOpen := target.Open
 	target.Open = true
 	if !wasOpen && target.OnOpen != nil {
 		target.OnOpen()
 	}
 	found := false
-	for _, win := range windows {
+	for _, win := range ctx.windows {
 		if win == target {
 			found = true
 			break
@@ -421,8 +510,8 @@ func (target *windowData) MarkOpen() {
 		target.BringForward()
 	}
 	target.Refresh()
-	if WindowStateChanged != nil {
-		WindowStateChanged()
+	if ctx.WindowStateChanged != nil {
+		ctx.WindowStateChanged()
 	}
 
 }
@@ -458,6 +547,8 @@ func (target *windowData) Toggle() {
 }
 
 func (target *windowData) Close() {
+	ctx := target.ui()
+
 	if target.BeforeClose != nil && !target.BeforeClose() {
 		return
 	}
@@ -468,8 +559,8 @@ func (target *windowData) Close() {
 		target.OnClose()
 	}
 	target.deallocate()
-	if WindowStateChanged != nil {
-		WindowStateChanged()
+	if ctx.WindowStateChanged != nil {
+		ctx.WindowStateChanged()
 	}
 }
 
@@ -478,6 +569,8 @@ func (target *windowData) Close() {
 // positioned adjacent to the anchor while trying to avoid overlapping the
 // anchor's parent window when possible and clamping to screen bounds.
 func (target *windowData) MarkOpenNear(anchor *itemData) {
+	ctx := target.ui()
+
 	// The workspace owns a docked pane's geometry; opening it must not
 	// move it next to a menu or a settings checkbox.
 	if target.Docked {
@@ -491,7 +584,7 @@ func (target *windowData) MarkOpenNear(anchor *itemData) {
 		return
 	}
 	if anchor != nil {
-		placeWindowNear(target, anchor)
+		ctx.placeWindowNear(target, anchor)
 	}
 	target.MarkOpen()
 }
@@ -513,14 +606,14 @@ func (target *windowData) ToggleNear(anchor *itemData) {
 
 // placeWindowNear computes a good position for win next to anchor and moves it
 // there, preferring not to overlap the anchor's parent window if possible.
-func placeWindowNear(win *windowData, anchor *itemData) {
+func (ctx *Context) placeWindowNear(win *windowData, anchor *itemData) {
 	if win == nil || anchor == nil {
 		return
 	}
 	// Anchor screen rect
 	ar := anchor.DrawRect
 	// Candidate positions: right, below, left, above
-	gap := float32(8) * UIScale()
+	gap := float32(8) * ctx.UIScale()
 	size := win.GetSize()
 	candidates := []point{
 		{X: ar.X1 + gap, Y: ar.Y0},          // right
@@ -578,23 +671,25 @@ func placeWindowNear(win *windowData, anchor *itemData) {
 
 // Send a window to the back
 func (target *windowData) ToBack() {
-	for w, win := range windows {
+	ctx := target.ui()
+
+	for w, win := range ctx.windows {
 		if win == target {
-			windows = append(windows[:w], windows[w+1:]...)
+			ctx.windows = append(ctx.windows[:w], ctx.windows[w+1:]...)
 			idx := 0
-			for idx < len(windows) && windows[idx].AlwaysDrawFirst {
+			for idx < len(ctx.windows) && ctx.windows[idx].AlwaysDrawFirst {
 				idx++
 			}
 			if target.AlwaysDrawFirst {
 				idx = 0
 			}
-			windows = append(windows[:idx], append([]*windowData{target}, windows[idx:]...)...)
+			ctx.windows = append(ctx.windows[:idx], append([]*windowData{target}, ctx.windows[idx:]...)...)
 		}
 	}
-	if activeWindow == target {
-		numWindows := len(windows)
+	if ctx.activeWindow == target {
+		numWindows := len(ctx.windows)
 		if numWindows > 0 {
-			activeWindow = windows[numWindows-1]
+			ctx.activeWindow = ctx.windows[numWindows-1]
 		}
 	}
 }
@@ -608,7 +703,9 @@ func (win *windowData) getPosition() point {
 // getPosition returns the item's position in screen pixels relative to its
 // parent window, honoring the current UI scale.
 func (item *itemData) getPosition(win *windowData) point {
-	s := uiScale
+	ctx := item.ui()
+
+	s := ctx.uiScale
 	if win != nil {
 		s = win.scale()
 	}

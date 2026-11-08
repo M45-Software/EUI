@@ -3,20 +3,22 @@ package eui
 import "testing"
 
 func TestSplitButtonSegmentsKeepIndependentActions(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := uiScale
-	oldActive, oldHovered := activeItem, hoveredItem
-	t.Cleanup(func() { uiScale, activeItem, hoveredItem = oldScale, oldActive, oldHovered })
-	uiScale = 1
+	oldScale := ctx.uiScale
+	oldActive, oldHovered := ctx.activeItem, ctx.hoveredItem
+	t.Cleanup(func() { ctx.uiScale, ctx.activeItem, ctx.hoveredItem = oldScale, oldActive, oldHovered })
+	ctx.uiScale = 1
 	leftClicks, rightClicks := 0, 0
-	left := NewActionButton("-", func() { leftClicks++ })
-	right := NewActionButton("+", func() { rightClicks++ })
+	left := ctx.NewActionButton("-", func() { leftClicks++ })
+	right := ctx.NewActionButton("+", func() { rightClicks++ })
 	left.Size, right.Size = Point{X: 40, Y: 24}, Point{X: 30, Y: 24}
 	left.SetTooltip("Decrease")
 	right.SetTooltip("Increase")
-	group := NewSplitButton(left, right)
+	group := ctx.NewSplitButton(left, right)
 	if group.GetSize().X != 70 || left.Position != (Point{}) || right.Position != (Point{}) {
 		t.Fatal("segments retained a gap or lost their sizes", group.GetSize())
 	}

@@ -118,18 +118,18 @@ var defaultStyle = &StyleTheme{
 }
 
 var (
-	baseStyle        = *defaultStyle
-	currentStyle     = defaultStyle
-	currentStyleName = "Default"
+	baseStyle = *defaultStyle
 )
 
-func LoadStyle(name string) error {
+func (ctx *Context) LoadStyle(name string) error {
+	ctx.mustAlive()
+
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Default"
 	}
 	// Try the user data directory first.
-	file := filepath.Join(themeDirectory, "styles", name+".json")
+	file := filepath.Join(ctx.themeDirectory, "styles", name+".json")
 	data, err := os.ReadFile(file)
 	if err != nil {
 		// Fallback to embedded styles; embed paths must use forward slashes
@@ -150,80 +150,80 @@ func LoadStyle(name string) error {
 	if err := json.Unmarshal(data, &next); err != nil {
 		return err
 	}
-	currentStyle = &next
-	SetCurrentStyleName(name)
-	if currentTheme != nil {
-		applyStyleToTheme(currentTheme)
-		applyStyleToItems(currentTheme)
-		markAllDirty()
+	ctx.currentStyle = &next
+	ctx.SetCurrentStyleName(name)
+	if ctx.currentTheme != nil {
+		ctx.applyStyleToTheme(ctx.currentTheme)
+		ctx.applyStyleToItems(ctx.currentTheme)
+		ctx.markAllDirty()
 	}
-	refreshStyleMod()
+	ctx.refreshStyleMod()
 	return nil
 }
 
-func applyStyleToTheme(th *Theme) {
-	if th == nil || currentStyle == nil {
+func (ctx *Context) applyStyleToTheme(th *Theme) {
+	if th == nil || ctx.currentStyle == nil {
 		return
 	}
-	th.Window.Fillet = currentStyle.Fillet.Window
-	th.Window.Border = currentStyle.Border.Window
-	th.Window.BorderPad = currentStyle.BorderPad.Window
-	th.Window.Outlined = currentStyle.Outlined.Window
+	th.Window.Fillet = ctx.currentStyle.Fillet.Window
+	th.Window.Border = ctx.currentStyle.Border.Window
+	th.Window.BorderPad = ctx.currentStyle.BorderPad.Window
+	th.Window.Outlined = ctx.currentStyle.Outlined.Window
 
-	th.Button.Fillet = currentStyle.Fillet.Button
-	th.Button.Border = currentStyle.Border.Button
-	th.Button.BorderPad = currentStyle.BorderPad.Button
-	th.Button.Filled = currentStyle.Filled.Button
-	th.Button.Outlined = currentStyle.Outlined.Button
+	th.Button.Fillet = ctx.currentStyle.Fillet.Button
+	th.Button.Border = ctx.currentStyle.Border.Button
+	th.Button.BorderPad = ctx.currentStyle.BorderPad.Button
+	th.Button.Filled = ctx.currentStyle.Filled.Button
+	th.Button.Outlined = ctx.currentStyle.Outlined.Button
 
-	th.Text.Fillet = currentStyle.Fillet.Text
-	th.Text.Border = currentStyle.Border.Text
-	th.Text.BorderPad = currentStyle.BorderPad.Text
-	th.Text.Filled = currentStyle.Filled.Text
-	th.Text.Outlined = currentStyle.Outlined.Text
+	th.Text.Fillet = ctx.currentStyle.Fillet.Text
+	th.Text.Border = ctx.currentStyle.Border.Text
+	th.Text.BorderPad = ctx.currentStyle.BorderPad.Text
+	th.Text.Filled = ctx.currentStyle.Filled.Text
+	th.Text.Outlined = ctx.currentStyle.Outlined.Text
 
-	th.Checkbox.Fillet = currentStyle.Fillet.Checkbox
-	th.Checkbox.Border = currentStyle.Border.Checkbox
-	th.Checkbox.BorderPad = currentStyle.BorderPad.Checkbox
-	th.Checkbox.Filled = currentStyle.Filled.Checkbox
-	th.Checkbox.Outlined = currentStyle.Outlined.Checkbox
+	th.Checkbox.Fillet = ctx.currentStyle.Fillet.Checkbox
+	th.Checkbox.Border = ctx.currentStyle.Border.Checkbox
+	th.Checkbox.BorderPad = ctx.currentStyle.BorderPad.Checkbox
+	th.Checkbox.Filled = ctx.currentStyle.Filled.Checkbox
+	th.Checkbox.Outlined = ctx.currentStyle.Outlined.Checkbox
 
-	th.Radio.Fillet = currentStyle.Fillet.Radio
-	th.Radio.Border = currentStyle.Border.Radio
-	th.Radio.BorderPad = currentStyle.BorderPad.Radio
-	th.Radio.Filled = currentStyle.Filled.Radio
-	th.Radio.Outlined = currentStyle.Outlined.Radio
+	th.Radio.Fillet = ctx.currentStyle.Fillet.Radio
+	th.Radio.Border = ctx.currentStyle.Border.Radio
+	th.Radio.BorderPad = ctx.currentStyle.BorderPad.Radio
+	th.Radio.Filled = ctx.currentStyle.Filled.Radio
+	th.Radio.Outlined = ctx.currentStyle.Outlined.Radio
 
-	th.Input.Fillet = currentStyle.Fillet.Input
-	th.Input.Border = currentStyle.Border.Input
-	th.Input.BorderPad = currentStyle.BorderPad.Input
-	th.Input.Filled = currentStyle.Filled.Input
-	th.Input.Outlined = currentStyle.Outlined.Input
+	th.Input.Fillet = ctx.currentStyle.Fillet.Input
+	th.Input.Border = ctx.currentStyle.Border.Input
+	th.Input.BorderPad = ctx.currentStyle.BorderPad.Input
+	th.Input.Filled = ctx.currentStyle.Filled.Input
+	th.Input.Outlined = ctx.currentStyle.Outlined.Input
 
-	th.Slider.Fillet = currentStyle.Fillet.Slider
-	th.Slider.Border = currentStyle.Border.Slider
-	th.Slider.BorderPad = currentStyle.BorderPad.Slider
-	th.Slider.Filled = currentStyle.Filled.Slider
-	th.Slider.Outlined = currentStyle.Outlined.Slider
+	th.Slider.Fillet = ctx.currentStyle.Fillet.Slider
+	th.Slider.Border = ctx.currentStyle.Border.Slider
+	th.Slider.BorderPad = ctx.currentStyle.BorderPad.Slider
+	th.Slider.Filled = ctx.currentStyle.Filled.Slider
+	th.Slider.Outlined = ctx.currentStyle.Outlined.Slider
 
-	th.Dropdown.Fillet = currentStyle.Fillet.Dropdown
-	th.Dropdown.Border = currentStyle.Border.Dropdown
-	th.Dropdown.BorderPad = currentStyle.BorderPad.Dropdown
-	th.Dropdown.Filled = currentStyle.Filled.Dropdown
-	th.Dropdown.Outlined = currentStyle.Outlined.Dropdown
+	th.Dropdown.Fillet = ctx.currentStyle.Fillet.Dropdown
+	th.Dropdown.Border = ctx.currentStyle.Border.Dropdown
+	th.Dropdown.BorderPad = ctx.currentStyle.BorderPad.Dropdown
+	th.Dropdown.Filled = ctx.currentStyle.Filled.Dropdown
+	th.Dropdown.Outlined = ctx.currentStyle.Outlined.Dropdown
 
-	th.Tab.Fillet = currentStyle.Fillet.Tab
-	th.Tab.Border = currentStyle.Border.Tab
-	th.Tab.BorderPad = currentStyle.BorderPad.Tab
-	th.Tab.Filled = currentStyle.Filled.Tab
-	th.Tab.Outlined = currentStyle.Outlined.Tab
-	th.Tab.ActiveOutline = currentStyle.ActiveOutline.Tab
+	th.Tab.Fillet = ctx.currentStyle.Fillet.Tab
+	th.Tab.Border = ctx.currentStyle.Border.Tab
+	th.Tab.BorderPad = ctx.currentStyle.BorderPad.Tab
+	th.Tab.Filled = ctx.currentStyle.Filled.Tab
+	th.Tab.Outlined = ctx.currentStyle.Outlined.Tab
+	th.Tab.ActiveOutline = ctx.currentStyle.ActiveOutline.Tab
 }
 
 // applyStyleToItems updates the style-related fields of all existing windows
 // and items that use the provided theme so changes take effect immediately.
-func applyStyleToItems(th *Theme) {
-	for _, win := range windows {
+func (ctx *Context) applyStyleToItems(th *Theme) {
+	for _, win := range ctx.windows {
 		if win == nil || (win.Theme != nil && win.Theme != th) {
 			continue
 		}
@@ -232,6 +232,8 @@ func applyStyleToItems(th *Theme) {
 		win.BorderPad = th.Window.BorderPad
 		win.Outlined = th.Window.Outlined
 		updateItemStyleTree(win.Contents, th)
+		// Tab padding and style metrics can change wrapping and descendant sizes.
+		win.RefreshWithReason("style")
 	}
 }
 
@@ -310,7 +312,7 @@ func updateItemStyleTree(items []*itemData, th *Theme) {
 }
 
 // listStyles returns the available style theme names from the themes directory
-func listStyles() ([]string, error) {
+func (ctx *Context) listStyles() ([]string, error) {
 	embeddedEntries, err := fs.ReadDir(embeddedStyles, "themes/styles")
 	if err != nil {
 		return nil, err
@@ -326,7 +328,7 @@ func listStyles() ([]string, error) {
 		}
 	}
 	addEntries(embeddedEntries)
-	localEntries, err := os.ReadDir(filepath.Join(themeDirectory, "styles"))
+	localEntries, err := os.ReadDir(filepath.Join(ctx.themeDirectory, "styles"))
 	if err == nil {
 		addEntries(localEntries)
 	} else if !errors.Is(err, os.ErrNotExist) {

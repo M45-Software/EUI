@@ -16,15 +16,17 @@ import (
 
 // Run alone: Ebitengine permits only one RunGame call per process.
 func TestRenderThemeGallery(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_THEME_GALLERY") == "" {
 		t.Skip("set EUI_RENDER_THEME_GALLERY=1 to render theme states")
 	}
-	isolateThemeTest(t)
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx.isolateThemeTest(t)
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	SetScreenSize(1600, 2400)
-	SetUIScale(1)
+	ctx.SetScreenSize(1600, 2400)
+	ctx.SetUIScale(1)
 	outputDir := os.Getenv("EUI_THEME_GALLERY_DIR")
 	if outputDir == "" {
 		outputDir = t.TempDir()
@@ -32,7 +34,7 @@ func TestRenderThemeGallery(t *testing.T) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	g := &themePreview{outputDir: outputDir}
+	g := &themePreview{ctx: ctx, outputDir: outputDir}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +45,8 @@ func TestRenderThemeGallery(t *testing.T) {
 }
 
 type themePreview struct {
+	ctx *Context
+
 	done      bool
 	outputDir string
 	err       error
@@ -64,17 +68,19 @@ func (g *themePreview) Draw(_ *ebiten.Image) {
 }
 
 func (g *themePreview) render() error {
-	if err := verifyPreviewMenuPixels(); err != nil {
+	ctx := g.ctx
+
+	if err := ctx.verifyPreviewMenuPixels(); err != nil {
 		return err
 	}
-	if err := verifyPaletteSwitchPixels(); err != nil {
+	if err := ctx.verifyPaletteSwitchPixels(); err != nil {
 		return err
 	}
 	// Border pixels must survive the exact clipping used by controls.
 	for _, radius := range []float32{0, 3, 8} {
 		for _, width := range []float32{1, 2} {
 			target := ebiten.NewImage(48, 32)
-			drawRoundRect(target, &roundRect{Size: point{48, 32}, Fillet: radius, Border: width, Color: ColorWhite})
+			ctx.drawRoundRect(target, &roundRect{Size: point{48, 32}, Fillet: radius, Border: width, Color: ColorWhite})
 			for _, p := range []image.Point{{24, 0}, {24, 31}, {0, 16}, {47, 16}} {
 				_, _, _, a := target.At(p.X, p.Y).RGBA()
 				if a < 0xf000 {
@@ -84,14 +90,14 @@ func (g *themePreview) render() error {
 			target.Deallocate()
 		}
 	}
-	renderNow = time.Now()
+	ctx.renderNow = time.Now()
 	for _, group := range []string{"palettes", "styles"} {
 		var names []string
 		var err error
 		if group == "palettes" {
-			names, err = ListThemes()
+			names, err = ctx.ListThemes()
 		} else {
-			names, err = ListStyles()
+			names, err = ctx.ListStyles()
 		}
 		if err != nil {
 			return err
@@ -106,79 +112,79 @@ func (g *themePreview) render() error {
 		sheet := ebiten.NewImage(1440, 340*((len(names)+2)/3))
 		for n, name := range names {
 			if group == "palettes" {
-				err = LoadTheme(name)
+				err = ctx.LoadTheme(name)
 			} else {
-				err = LoadTheme("AccentLight")
+				err = ctx.LoadTheme("AccentLight")
 				if err == nil {
-					err = LoadStyle(name)
+					err = ctx.LoadStyle(name)
 				}
 			}
 			if err != nil {
 				return err
 			}
 			card := ebiten.NewImage(480, 340)
-			card.Fill(currentTheme.Window.BGColor)
-			win := NewWindow()
+			card.Fill(ctx.currentTheme.Window.BGColor)
+			win := ctx.NewWindow()
 			draw := func(it *itemData, x, y, w, h float32) {
 				it.Size = point{w, h}
 				it.ParentWindow = win
 				it.drawItemInternal(point{x, y}, point{}, point{w, h}, rect{x, y, x + w, y + h}, card)
 			}
-			title, _ := NewText()
+			title, _ := ctx.NewText()
 			title.Text = name
 			title.FontSize = 18
 			draw(title, 16, 12, 450, 30)
 			for i, label := range []string{"Normal", "Hover", "Disabled"} {
-				it, _ := NewButton()
+				it, _ := ctx.NewButton()
 				it.Text = label
 				it.Hovered = i == 1
 				it.Disabled = i == 2
 				draw(it, float32(16+i*152), 52, 140, 32)
 			}
-			pressed, _ := NewButton()
+			pressed, _ := ctx.NewButton()
 			pressed.Text = "Pressed"
-			pressed.Clicked = renderNow
+			pressed.Clicked = ctx.renderNow
 			draw(pressed, 16, 96, 140, 32)
-			input, _ := NewInput()
+			input, _ := ctx.NewInput()
 			input.Text = "Focused input"
 			input.Focused = true
 			draw(input, 168, 96, 140, 32)
-			cb, _ := NewCheckbox()
+			cb, _ := ctx.NewCheckbox()
 			cb.Text = "Checked"
 			cb.Checked = true
 			draw(cb, 320, 102, 140, 24)
-			selected, _ := NewText()
+			selected, _ := ctx.NewText()
 			selected.Text = "Selected text stays readable"
 			selected.FontSize = 14
 			selected.SelectableText = true
 			selected.SelectStart = 0
 			selected.SelectEnd = 13
 			draw(selected, 16, 144, 448, 28)
-			dd, _ := NewDropdown()
+			dd, _ := ctx.NewDropdown()
 			dd.Options = []string{"Normal option", "Selected option", "Hovered option"}
 			dd.Selected = 1
 			dd.HoverIndex = 2
 			dd.Open = true
 			draw(dd, 16, 188, 248, 28)
-			drawDropdownOptions(dd, point{16, 188}, rect{0, 0, 480, 340}, card)
-			caption, _ := NewText()
+			ctx.drawDropdownOptions(dd, point{16, 188}, rect{0, 0, 480, 340}, card)
+			caption, _ := ctx.NewText()
 			caption.Text = "Custom white accent"
 			caption.FontSize = 12
 			draw(caption, 286, 192, 180, 24)
-			SetAccentSaturation(0)
-			SetAccentColor(ColorWhite)
-			extreme, _ := NewButton()
+			ctx.SetAccentSaturation(0)
+			ctx.SetAccentColor(ColorWhite)
+			extreme, _ := ctx.NewButton()
 			extreme.Text = "Readable"
-			extreme.Clicked = renderNow
+			extreme.Clicked = ctx.renderNow
 			draw(extreme, 286, 220, 160, 32)
 			// Verify the actual renderer applies contrasting icon color on a white press.
 			icon := ebiten.NewImage(16, 16)
 			icon.Fill(ColorWhite)
-			mask, _ := NewButton()
+			mask, _ := ctx.NewButton()
 			mask.Image = icon
 			mask.TintImage = true
 			mask.Filled = true
-			mask.Clicked = renderNow
+			mask.Clicked = ctx.renderNow
 			draw(mask, 286, 266, 32, 32)
 			pixel := card.At(302, 282)
 			r, gg, b, _ := pixel.RGBA()
@@ -214,25 +220,25 @@ func (g *themePreview) render() error {
 
 // Compare controls surviving a palette change with freshly constructed controls.
 // This catches copied colors that otherwise look correct in a static gallery.
-func verifyPaletteSwitchPixels() error {
-	if err := LoadTheme("NeonNight"); err != nil {
+func (ctx *Context) verifyPaletteSwitchPixels() error {
+	if err := ctx.LoadTheme("NeonNight"); err != nil {
 		return err
 	}
-	win := NewWindow()
-	oldWindows := windows
-	windows = []*windowData{win}
-	defer func() { windows = oldWindows }()
-	constructors := []func() (*itemData, *EventHandler){NewButton, NewInput, NewProgressBar}
+	win := ctx.NewWindow()
+	oldWindows := ctx.windows
+	ctx.windows = []*windowData{win}
+	defer func() { ctx.windows = oldWindows }()
+	constructors := []func() (*itemData, *EventHandler){ctx.NewButton, ctx.NewInput, ctx.NewProgressBar}
 	for _, makeControl := range constructors {
 		item, _ := makeControl()
 		win.AddItem(item)
 	}
-	names, err := ListThemes()
+	names, err := ctx.ListThemes()
 	if err != nil {
 		return err
 	}
 	for _, name := range names {
-		if err := LoadTheme(name); err != nil {
+		if err := ctx.LoadTheme(name); err != nil {
 			return err
 		}
 		for i, makeControl := range constructors {
@@ -258,11 +264,11 @@ func verifyPaletteSwitchPixels() error {
 	return nil
 }
 
-func verifyPreviewMenuPixels() error {
-	if err := LoadTheme("AccentLight"); err != nil {
+func (ctx *Context) verifyPreviewMenuPixels() error {
+	if err := ctx.LoadTheme("AccentLight"); err != nil {
 		return err
 	}
-	dd, _ := NewDropdown()
+	dd, _ := ctx.NewDropdown()
 	dd.Open = true
 	dd.Label = "Style"
 	dd.Options = []string{"Current", "Preview", "Third"}
@@ -276,12 +282,12 @@ func verifyPreviewMenuPixels() error {
 			dd.FontSize = 32
 			dd.Size = point{320, 64}
 			dd.BorderPad = 20
-			next := *currentStyle
+			next := *ctx.currentStyle
 			next.TextPadding = 24
-			currentStyle = &next
+			ctx.currentStyle = &next
 		}
 		canvas := ebiten.NewImage(640, 480)
-		drawDropdownOptions(dd, offset, rect{0, 0, 640, 480}, canvas)
+		ctx.drawDropdownOptions(dd, offset, rect{0, 0, 640, 480}, canvas)
 		pixels[i] = make([]byte, 640*480*4)
 		canvas.ReadPixels(pixels[i])
 		canvas.Deallocate()

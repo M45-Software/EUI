@@ -6,9 +6,11 @@ package eui
 import "testing"
 
 func TestSnapToCorner(t *testing.T) {
-	screenWidth = 100
-	screenHeight = 100
-	uiScale = 1
+	ctx := newTestContext(t)
+
+	ctx.screenWidth = 100
+	ctx.screenHeight = 100
+	ctx.uiScale = 1
 
 	winSize := point{X: 10, Y: 10}
 	offset := CornerSnapThreshold - 1
@@ -19,14 +21,14 @@ func TestSnapToCorner(t *testing.T) {
 		v   VZone
 	}{
 		{point{offset, offset}, HZoneLeft, VZoneTop},
-		{point{float32(screenWidth) - winSize.X - offset, offset}, HZoneRight, VZoneTop},
-		{point{offset, float32(screenHeight) - winSize.Y - offset}, HZoneLeft, VZoneBottom},
-		{point{float32(screenWidth) - winSize.X - offset, float32(screenHeight) - winSize.Y - offset}, HZoneRight, VZoneBottom},
+		{point{float32(ctx.screenWidth) - winSize.X - offset, offset}, HZoneRight, VZoneTop},
+		{point{offset, float32(ctx.screenHeight) - winSize.Y - offset}, HZoneLeft, VZoneBottom},
+		{point{float32(ctx.screenWidth) - winSize.X - offset, float32(ctx.screenHeight) - winSize.Y - offset}, HZoneRight, VZoneBottom},
 	}
 
 	for _, tt := range tests {
-		win := &windowData{Position: tt.pos, Size: winSize}
-		snapToCorner(win)
+		win := &windowData{ctx: ctx, Position: tt.pos, Size: winSize}
+		ctx.snapToCorner(win)
 		if win.zone == nil {
 			t.Fatalf("zone not set for pos %+v", tt.pos)
 		}
@@ -38,15 +40,17 @@ func TestSnapToCorner(t *testing.T) {
 
 // TestSnapToCornerScaled verifies corner snapping when a uiScale other than 1 is in use.
 func TestSnapToCornerScaled(t *testing.T) {
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 2
+	ctx := newTestContext(t)
+
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 2
 
 	winSize := point{X: 10, Y: 10}
 	offset := CornerSnapThreshold - 1
 
-	sw := float32(screenWidth) / uiScale
-	sh := float32(screenHeight) / uiScale
+	sw := float32(ctx.screenWidth) / ctx.uiScale
+	sh := float32(ctx.screenHeight) / ctx.uiScale
 
 	tests := []struct {
 		pos point
@@ -60,8 +64,8 @@ func TestSnapToCornerScaled(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		win := &windowData{Position: tt.pos, Size: winSize}
-		snapToCorner(win)
+		win := &windowData{ctx: ctx, Position: tt.pos, Size: winSize}
+		ctx.snapToCorner(win)
 		if win.zone == nil {
 			t.Fatalf("zone not set for pos %+v", tt.pos)
 		}
@@ -72,11 +76,13 @@ func TestSnapToCornerScaled(t *testing.T) {
 }
 
 func TestSnapToWindow(t *testing.T) {
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 1
+	ctx := newTestContext(t)
 
-	base := &windowData{Position: point{50, 50}, Size: point{30, 30}, Open: true}
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 1
+
+	base := &windowData{ctx: ctx, Position: point{50, 50}, Size: point{30, 30}, Open: true}
 	winSize := point{10, 10}
 	offset := CornerSnapThreshold - 1
 
@@ -92,59 +98,65 @@ func TestSnapToWindow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		win := &windowData{Position: tt.pos, Size: winSize, Open: true}
-		windows = []*windowData{base, win}
-		snapToWindow(win)
+		win := &windowData{ctx: ctx, Position: tt.pos, Size: winSize, Open: true}
+		ctx.windows = []*windowData{base, win}
+		ctx.snapToWindow(win)
 		if win.Position != tt.expect {
 			t.Fatalf("%s: pos %+v snapped to %+v; want %+v", tt.name, tt.pos, win.Position, tt.expect)
 		}
 	}
-	windows = nil
+	ctx.windows = nil
 }
 
 func TestSnapResizeToWindow(t *testing.T) {
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 1
+	ctx := newTestContext(t)
 
-	base := &windowData{Position: point{120, 50}, Size: point{20, 20}, Open: true}
-	win := &windowData{Position: point{50, 50}, Size: point{68, 20}, Open: true, Resizable: true}
-	windows = []*windowData{base, win}
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 1
 
-	snapResize(win, PART_RIGHT)
+	base := &windowData{ctx: ctx, Position: point{120, 50}, Size: point{20, 20}, Open: true}
+	win := &windowData{ctx: ctx, Position: point{50, 50}, Size: point{68, 20}, Open: true, Resizable: true}
+	ctx.windows = []*windowData{base, win}
+
+	ctx.snapResize(win, PART_RIGHT)
 
 	expectedWidth := base.Position.X - win.Position.X
 	if win.Size.X != expectedWidth {
 		t.Fatalf("width snapped to %v; want %v", win.Size.X, expectedWidth)
 	}
-	windows = nil
+	ctx.windows = nil
 }
 
 func TestSnapResizeToScreen(t *testing.T) {
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 1
+	ctx := newTestContext(t)
 
-	win := &windowData{Position: point{50, 50}, Size: point{20, 141}, Open: true, Resizable: true}
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 1
 
-	snapResize(win, PART_BOTTOM)
+	win := &windowData{ctx: ctx, Position: point{50, 50}, Size: point{20, 141}, Open: true, Resizable: true}
 
-	expectedHeight := float32(screenHeight) - win.Position.Y
+	ctx.snapResize(win, PART_BOTTOM)
+
+	expectedHeight := float32(ctx.screenHeight) - win.Position.Y
 	if win.Size.Y != expectedHeight {
 		t.Fatalf("height snapped to %v; want %v", win.Size.Y, expectedHeight)
 	}
 }
 
 func TestSnapResizeToScreenScaled(t *testing.T) {
-	screenWidth = 200
-	screenHeight = 200
-	uiScale = 2
+	ctx := newTestContext(t)
 
-	win := &windowData{Position: point{50, 50}, Size: point{20, 45}, Open: true, Resizable: true}
+	ctx.screenWidth = 200
+	ctx.screenHeight = 200
+	ctx.uiScale = 2
 
-	snapResize(win, PART_BOTTOM)
+	win := &windowData{ctx: ctx, Position: point{50, 50}, Size: point{20, 45}, Open: true, Resizable: true}
 
-	expectedHeight := float32(screenHeight)/uiScale - win.Position.Y
+	ctx.snapResize(win, PART_BOTTOM)
+
+	expectedHeight := float32(ctx.screenHeight)/ctx.uiScale - win.Position.Y
 	if win.Size.Y != expectedHeight {
 		t.Fatalf("height snapped to %v; want %v", win.Size.Y, expectedHeight)
 	}

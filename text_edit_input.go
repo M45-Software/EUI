@@ -1,41 +1,39 @@
 package eui
 
 import (
-	"context"
 	"math"
 	"time"
 
 	"github.com/Distortions81/EUI/internal/inputkeys"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	clipboard "golang.design/x/clipboard"
 )
 
-func textKeyRepeats(key ebiten.Key) bool {
-	d := inpututil.KeyPressDuration(key)
+func (ctx *Context) textKeyRepeats(key ebiten.Key) bool {
+	d := ctx.keyPressDuration(key)
 	return d == 1 || d > 24 && (d-24)%3 == 0
 }
 
 func (item *itemData) updateTextEditing(chars []rune, mods inputkeys.Modifiers, shift bool) bool {
+	ctx := item.ui()
+
 	item.editor()
 	handled := false
 	if mods.Shortcut() {
 		for _, key := range []ebiten.Key{ebiten.KeyA, ebiten.KeyZ, ebiten.KeyY, ebiten.KeyEqual, ebiten.KeyMinus, ebiten.KeyKPAdd, ebiten.KeyKPSubtract} {
-			if inpututil.IsKeyJustPressed(key) {
+			if ctx.keyJustPressed(key) {
 				handled = item.editKey(key, mods, shift) || handled
 			}
 		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyX) {
+		if ctx.keyJustPressed(ebiten.KeyX) {
 			item.editCut(func(value string) error {
-				_, err := clipboard.Write(context.Background(), clipboard.FmtText, []byte(value))
-				return err
+				return ctx.writeClipboard(value)
 			})
 			handled = true
 		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyV) {
-			if value, err := clipboard.Read(context.Background(), clipboard.FmtText); err == nil {
-				item.editInsert(string(value), "")
+		if ctx.keyJustPressed(ebiten.KeyV) {
+			if value, err := ctx.readClipboard(); err == nil {
+				item.editInsert(value, "")
 			}
 			handled = true
 		}
@@ -45,12 +43,12 @@ func (item *itemData) updateTextEditing(chars []rune, mods inputkeys.Modifiers, 
 		handled = true
 	}
 	for _, key := range []ebiten.Key{ebiten.KeyArrowLeft, ebiten.KeyArrowRight, ebiten.KeyArrowUp, ebiten.KeyArrowDown, ebiten.KeyHome, ebiten.KeyEnd, ebiten.KeyPageUp, ebiten.KeyPageDown, ebiten.KeyBackspace, ebiten.KeyDelete, ebiten.KeyEnter, ebiten.KeyKPEnter, ebiten.KeyTab} {
-		if textKeyRepeats(key) {
+		if ctx.textKeyRepeats(key) {
 			handled = item.editKey(key, mods, shift) || handled
 		}
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		ClearFocus(item)
+	if ctx.keyJustPressed(ebiten.KeyEscape) {
+		ctx.ClearFocus(item)
 		handled = true
 	}
 	return handled
@@ -58,7 +56,10 @@ func (item *itemData) updateTextEditing(chars []rune, mods inputkeys.Modifiers, 
 
 func (item *itemData) updateCaretBlink(now time.Time) {
 	s := item.editor()
-	on := s.caretReset.IsZero() || now.Sub(s.caretReset)%(time.Second) < 500*time.Millisecond
+	if s.caretReset.IsZero() {
+		s.caretReset = now
+	}
+	on := now.Sub(s.caretReset)%(time.Second) < 500*time.Millisecond
 	if on != s.caretOn {
 		s.caretOn = on
 		item.markDirty()
@@ -66,7 +67,9 @@ func (item *itemData) updateCaretBlink(now time.Time) {
 }
 
 func (item *itemData) clickEditableText(mpos point, extend bool) {
-	activeSearch = nil
+	ctx := item.ui()
+
+	ctx.activeSearch = nil
 	state := item.editor()
 	pos, upstream := item.editHit(mpos)
 	state.group, state.hasPreferredX = "", false
@@ -74,7 +77,7 @@ func (item *itemData) clickEditableText(mpos point, extend bool) {
 		item.editMove(pos, true)
 		state.clickCount = 0
 	} else {
-		if !state.lastClick.IsZero() && updateNow.Sub(state.lastClick) < 400*time.Millisecond && math.Hypot(float64(mpos.X-state.lastClickPos.X), float64(mpos.Y-state.lastClickPos.Y)) < float64(5*uiScale) {
+		if !state.lastClick.IsZero() && ctx.updateNow.Sub(state.lastClick) < 400*time.Millisecond && math.Hypot(float64(mpos.X-state.lastClickPos.X), float64(mpos.Y-state.lastClickPos.Y)) < float64(5*ctx.uiScale) {
 			state.clickCount = state.clickCount%3 + 1
 		} else {
 			state.clickCount = 1
@@ -109,11 +112,11 @@ func (item *itemData) clickEditableText(mpos point, extend bool) {
 	if state.clickCount < 2 {
 		state.caretUpstream = upstream
 	}
-	state.lastClick, state.lastClickPos = updateNow, mpos
+	state.lastClick, state.lastClickPos = ctx.updateNow, mpos
 	state.dragStart, state.dragEnd = item.SelectStart, item.SelectEnd
 	item.selecting = true
 	item.Focused = true
-	focusedItem = item
+	ctx.focusedItem = item
 }
 
 func (item *itemData) dragEditableText(mpos point) {

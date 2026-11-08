@@ -6,7 +6,9 @@ import (
 )
 
 func TestTextEditorScrollbarContrastAcrossPalettes(t *testing.T) {
-	isolateThemeTest(t)
+	ctx := newTestContext(t)
+
+	ctx.isolateThemeTest(t)
 	entries, err := embeddedThemes.ReadDir("themes/palettes")
 	if err != nil {
 		t.Fatal(err)
@@ -17,10 +19,10 @@ func TestTextEditorScrollbarContrastAcrossPalettes(t *testing.T) {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
-			if err := LoadTheme(name); err != nil {
+			if err := ctx.LoadTheme(name); err != nil {
 				t.Fatal(err)
 			}
-			item, _ := NewTextArea()
+			item, _ := ctx.NewTextArea()
 			for _, background := range []Color{{}, ColorBlack, ColorWhite} {
 				item.Color = background
 				track, thumb := item.editScrollbarColors()
@@ -33,10 +35,12 @@ func TestTextEditorScrollbarContrastAcrossPalettes(t *testing.T) {
 }
 
 func TestTextEditorScrollbarDraggingAndPaging(t *testing.T) {
-	item := editingFixture(t, strings.Repeat(strings.Repeat("W", 90)+"\n", 40), true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, strings.Repeat(strings.Repeat("W", 90)+"\n", 40), true)
 	item.editSelect(5, 9)
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		item.textDrawOrigin, item.textDrawSize = point{X: 40, Y: 60}, point{X: 240 * scale, Y: 90 * scale}
 		item.DrawRect = rect{X0: 40, Y0: 60, X1: 40 + 240*scale, Y1: 60 + 90*scale}
 		for _, part := range []dragType{PART_SCROLL_V, PART_SCROLL_H} {
@@ -80,7 +84,9 @@ func TestTextEditorScrollbarDraggingAndPaging(t *testing.T) {
 }
 
 func TestTextEditorScrollbarViewportAndDocumentShrink(t *testing.T) {
-	item := editingFixture(t, strings.Repeat("wide line ", 100)+strings.Repeat("\nline", 30), true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, strings.Repeat("wide line ", 100)+strings.Repeat("\nline", 30), true)
 	offset, size := item.editDrawGeometry()
 	viewport, vertical, horizontal := item.editScrollGeometry(offset, size)
 	if viewport.X1 != vertical.X0 || viewport.Y1 != horizontal.Y0 || vertical.Y1 != viewport.Y1 || horizontal.X1 != viewport.X1 {

@@ -2,6 +2,7 @@ package eui
 
 import (
 	"math"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -25,6 +26,7 @@ type editTextLayout struct {
 	value             string
 	face              text.Face
 	lines             []editTextLine
+	logical           []editTextLine // unwrapped rows, shared across width-only reflows
 	lineHeight, width float32
 	wrapWidth         float32
 }
@@ -46,8 +48,10 @@ func (line editTextLine) nearest(x float32, face text.Face) int {
 }
 
 func (item *itemData) editLayout() *editTextLayout {
+	ctx := item.ui()
+
 	s := item.editor()
-	face := itemFace(item, item.FontSize*uiScale+2)
+	face := ctx.itemFace(item, item.FontSize*ctx.uiScale+2)
 	metrics := face.Metrics()
 	lineHeight := float32(math.Ceil(metrics.HAscent + metrics.HDescent + 2))
 	wrapWidth := float32(0)
@@ -56,42 +60,61 @@ func (item *itemData) editLayout() *editTextLayout {
 		viewport, gutter := item.editBaseViewport(offset, size, lineHeight)
 		wrapWidth = max(1, viewport.X1-viewport.X0-gutter-2)
 	}
-	if s.layout != nil && s.layout.value == item.Text && s.layout.face == face && s.layout.wrapWidth == wrapWidth {
+	value := item.displayEditText()
+	if s.layout != nil && s.layout.value == value && s.layout.face == face && s.layout.wrapWidth == wrapWidth {
 		return s.layout
 	}
 	if s.layout != nil {
 		s.followCaret, s.hasPreferredX = true, false
 	}
-	layout := &editTextLayout{value: item.Text, face: face, lineHeight: lineHeight, wrapWidth: wrapWidth}
-	start := 0
-	for _, raw := range strings.Split(item.Text, "\n") {
-		line := editTextLine{start: start, length: utf8.RuneCountInString(raw), stops: graphemeStops(raw), bytes: []int{0}}
-		var display strings.Builder
-		column := 0
-		for _, r := range raw {
-			if r == '\t' {
-				spaces := 4 - column%4
-				display.WriteString(strings.Repeat(" ", spaces))
-				column += spaces
-			} else {
-				display.WriteRune(r)
-				column++
+	layout := &editTextLayout{value: value, face: face, lineHeight: lineHeight, wrapWidth: wrapWidth}
+	if s.layout != nil && s.layout.value == value && s.layout.face == face {
+		layout.logical = s.layout.logical
+	} else {
+		layout.logical = make([]editTextLine, 0, strings.Count(value, "\n")+1)
+		start := 0
+		for raw := range strings.SplitSeq(value, "\n") {
+			line := editTextLine{start: start, length: utf8.RuneCountInString(raw), stops: graphemeStops(raw)}
+			line.bytes = make([]int, 1, line.length+1)
+			var display strings.Builder
+			display.Grow(len(raw) + strings.Count(raw, "\t")*3)
+			column := 0
+			for _, r := range raw {
+				if r == '\t' {
+					spaces := 4 - column%4
+					display.WriteString(strings.Repeat(" ", spaces))
+					column += spaces
+				} else {
+					display.WriteRune(r)
+					column++
+				}
+				line.bytes = append(line.bytes, display.Len())
 			}
-			line.bytes = append(line.bytes, display.Len())
+			if item.HideText {
+				// Mask glyphs still represent source rune offsets; pointer placement
+				// must not split a composed character in the underlying password.
+				source := item.SecretText
+				if c := item.activeComposition(); c != nil {
+					runes := []rune(source)
+					source = string(runes[:c.start]) + c.text + string(runes[c.end:])
+				}
+				line.stops = graphemeStops(source)
+			}
+			line.display = display.String()
+			line.width = float32(text.AdvanceAt(line.display, len(line.display), face))
+			layout.logical = append(layout.logical, line)
+			start += line.length + 1
 		}
-		if item.HideText {
-			// Mask glyphs still represent source rune offsets; pointer placement
-			// must not split a composed character in the underlying password.
-			line.stops = graphemeStops(item.SecretText)
+	}
+	if wrapWidth == 0 {
+		layout.lines = layout.logical
+	} else {
+		layout.lines = make([]editTextLine, 0, len(layout.logical))
+		i := 0
+		for raw := range strings.SplitSeq(value, "\n") {
+			layout.lines = appendWrappedEditLine(layout.lines, layout.logical[i], raw, face, wrapWidth)
+			i++
 		}
-		line.display = display.String()
-		line.width = float32(text.AdvanceAt(line.display, len(line.display), face))
-		if wrapWidth > 0 {
-			layout.lines = append(layout.lines, wrapEditLine(line, raw, face, wrapWidth)...)
-		} else {
-			layout.lines = append(layout.lines, line)
-		}
-		start += line.length + 1
 	}
 	for _, line := range layout.lines {
 		layout.width = max(layout.width, line.width)
@@ -105,16 +128,32 @@ func (layout *editTextLayout) caret(pos int) (int, float32) {
 }
 
 func (item *itemData) editCaret() (int, float32) {
-	return item.editLayout().caretAt(item.CursorPos, item.editor().caretUpstream)
+	return item.editLayout().caretAt(item.displayEditCaret(), item.editor().caretUpstream && !item.IsComposing())
 }
 
 func (layout *editTextLayout) caretAt(pos int, upstream bool) (int, float32) {
-	for i, line := range layout.lines {
-		if pos < line.start+line.length || pos == line.start+line.length && (!line.softBreak || upstream) || i == len(layout.lines)-1 {
-			return i, line.advance(pos-line.start, layout.face)
-		}
+	i := sort.Search(len(layout.lines), func(i int) bool {
+		line := layout.lines[i]
+		end := line.start + line.length
+		return pos < end || pos == end && (!line.softBreak || upstream)
+	})
+	if i == len(layout.lines) {
+		i--
 	}
-	return 0, 0
+	if i < 0 {
+		return 0, 0
+	}
+	line := layout.lines[i]
+	return i, line.advance(pos-line.start, layout.face)
+}
+
+// Only inspect rows intersecting the viewport. Document length must not add
+// work to a scroll repaint; row height is uniform even with soft wrapping.
+func (layout *editTextLayout) visibleLines(clip rect, originY float32) (int, int) {
+	n := len(layout.lines)
+	first := max(0, min(n, int(math.Floor(float64((clip.Y0-originY)/layout.lineHeight)))))
+	last := max(first, min(n, int(math.Ceil(float64((clip.Y1-originY)/layout.lineHeight)))))
+	return first, last
 }
 
 func (item *itemData) editViewport(offset, size point) rect {
@@ -123,7 +162,9 @@ func (item *itemData) editViewport(offset, size point) rect {
 }
 
 func (item *itemData) editBaseViewport(offset, size point, lineHeight float32) (rect, float32) {
-	pad := (item.BorderPad + item.Padding + currentStyle.TextPadding) * uiScale
+	ctx := item.ui()
+
+	pad := (item.BorderPad + item.Padding + ctx.currentStyle.TextPadding) * ctx.uiScale
 	// Small inputs must retain a full line even when a theme has generous
 	// horizontal padding. Center that line in the available control height.
 	padY := min(pad, max(0, (size.Y-lineHeight)/2))
@@ -132,10 +173,10 @@ func (item *itemData) editBaseViewport(offset, size point, lineHeight float32) (
 		Y1: max(offset.Y+padY+1, offset.Y+size.Y-padY)}
 	if item.ItemType == ITEM_INPUT && item.Label == "" {
 		if info := item.tooltipIndicatorRect(offset, size); info.X1 > info.X0 {
-			viewport.X1 = max(viewport.X0+1, min(viewport.X1, info.X0-3*uiScale))
+			viewport.X1 = max(viewport.X0+1, min(viewport.X1, info.X0-3*ctx.uiScale))
 		}
 	}
-	width := min(max(10*uiScale, ScrollbarWidth()), (viewport.X1-viewport.X0)/2, (viewport.Y1-viewport.Y0)/2)
+	width := min(max(10*ctx.uiScale, ctx.ScrollbarWidth()), (viewport.X1-viewport.X0)/2, (viewport.Y1-viewport.Y0)/2)
 	return viewport, width
 }
 
@@ -250,8 +291,9 @@ func (item *itemData) followEditCaret(viewport rect) {
 			state.scroll.X = x + 2 - w
 		}
 		// Keep a selected match fully visible when it fits on one line.
-		anchorLine, anchorX := layout.caret(item.SelectStart)
-		if item.SelectStart != item.SelectEnd && anchorLine == line && x >= anchorX && x-anchorX+2 <= w && anchorX < state.scroll.X {
+		start, end := item.displayEditSelection()
+		anchorLine, anchorX := layout.caret(start)
+		if start != end && anchorLine == line && x >= anchorX && x-anchorX+2 <= w && anchorX < state.scroll.X {
 			state.scroll.X = anchorX
 		}
 		if y < state.scroll.Y {
@@ -266,6 +308,8 @@ func (item *itemData) followEditCaret(viewport rect) {
 }
 
 func (item *itemData) drawEditableText(dst *ebiten.Image, offset, size point, clip rect, caption, selection Color) {
+	ctx := item.ui()
+
 	layout := item.editLayout()
 	viewport := item.editViewport(offset, size)
 	item.followEditCaret(viewport)
@@ -281,23 +325,29 @@ func (item *itemData) drawEditableText(dst *ebiten.Image, offset, size point, cl
 	if !item.Multiline {
 		origin.Y += max(0, (viewport.Y1-viewport.Y0-layout.lineHeight)/2)
 	}
-	start, end := item.editSelection()
-	highlights := item.textHighlights()
-	for i, line := range layout.lines {
+	start, end := item.displayEditSelection()
+	composition := item.activeComposition()
+	var highlights, swatches []TextColorSpan
+	if composition == nil {
+		highlights = item.textHighlights()
+		swatches = item.textSwatches()
+	}
+	first, last := layout.visibleLines(clip, origin.Y)
+	for i := first; i < last; i++ {
+		line := layout.lines[i]
 		y := origin.Y + float32(i)*layout.lineHeight
-		if y+layout.lineHeight <= clip.Y0 || y >= clip.Y1 {
-			continue
-		}
 		op := &text.DrawOptions{}
 		op.Filter = ebiten.FilterNearest
 		op.GeoM.Translate(float64(origin.X), float64(y))
 		op.ColorScale.ScaleWithColor(caption)
-		if len(highlights) == 0 && len(item.textSwatches()) == 0 {
+		if len(highlights) == 0 && len(swatches) == 0 {
 			text.Draw(target, line.display, layout.face, op)
 		} else {
 			item.drawHighlightedEditLine(target, line, layout.face, point{X: origin.X, Y: y}, highlights, caption)
 		}
-		item.drawTextSwatches(target, line, layout, origin, y)
+		if composition == nil {
+			item.drawTextSwatches(target, line, layout, origin, y)
+		}
 		a, b := max(start, line.start), min(end, line.start+line.length)
 		if start != end && (a < b || start <= line.start+line.length && end > line.start+line.length && !line.softBreak) {
 			x0 := line.advance(a-line.start, layout.face)
@@ -315,8 +365,16 @@ func (item *itemData) drawEditableText(dst *ebiten.Image, offset, size point, cl
 				selected.Recycle()
 			}
 		}
+		if composition != nil {
+			a, b := max(composition.start, line.start), min(composition.start+utf8.RuneCountInString(composition.text), line.start+line.length)
+			if a < b {
+				x0, x1 := line.advance(a-line.start, layout.face), line.advance(b-line.start, layout.face)
+				ctx.strokeLine(target, origin.X+x0, y+layout.lineHeight-2, origin.X+x1, y+layout.lineHeight-2, max(1, ctx.uiScale), caption, false)
+			}
+		}
+
 	}
-	if suffix := item.textCompletion(); suffix != "" {
+	if suffix := item.textCompletion(); suffix != "" && composition == nil {
 		line, x := item.editCaret()
 		op := &text.DrawOptions{}
 		op.Filter = ebiten.FilterNearest
@@ -326,10 +384,10 @@ func (item *itemData) drawEditableText(dst *ebiten.Image, offset, size point, cl
 		op.ColorScale.ScaleWithColor(ghost)
 		text.Draw(target, suffix, layout.face, op)
 	}
-	if item.Focused && state.caretOn && start == end {
+	if item.Focused && (composition != nil || state.caretOn && start == end) {
 		line, x := item.editCaret()
 		y := origin.Y + float32(line)*layout.lineHeight
-		strokeLine(target, origin.X+x, y, origin.X+x, y+layout.lineHeight-2, max(1, uiScale), caption, false)
+		ctx.strokeLine(target, origin.X+x, y, origin.X+x, y+layout.lineHeight-2, max(1, ctx.uiScale), caption, false)
 	}
 }
 
@@ -354,18 +412,19 @@ func (item *itemData) editZoomWheel(delta point, mods inputkeys.Modifiers) bool 
 	return true
 }
 
-func scrollEditable(items []*itemData, mpos, delta point, mods inputkeys.Modifiers) bool {
+func (ctx *Context) scrollEditable(items []*itemData, mpos, delta point, mods inputkeys.Modifiers) bool {
 	for _, item := range items {
 		if item.isInvisible() || !item.DrawRect.containsPoint(mpos) {
 			continue
 		}
 		if itemHandlesTextEditing(item) {
-			if !keyboardInputCaptured && item.editZoomWheel(delta, mods) {
+			item.CancelComposition()
+			if !ctx.keyboardInputCaptured && item.editZoomWheel(delta, mods) {
 				return true
 			}
 			state := item.editor()
 			viewport, _ := item.editGeometry()
-			if item.Multiline && !ShiftPressed {
+			if item.Multiline && !ctx.ShiftPressed {
 				state.scroll.Y -= delta.Y * item.editLayout().lineHeight * 3
 			} else {
 				state.scroll.X -= delta.Y * item.editLayout().lineHeight * 3
@@ -376,11 +435,7 @@ func scrollEditable(items []*itemData, mpos, delta point, mods inputkeys.Modifie
 			item.markDirty()
 			return true
 		}
-		if len(item.Tabs) > 0 {
-			if item.ActiveTab >= 0 && item.ActiveTab < len(item.Tabs) && scrollEditable(item.Tabs[item.ActiveTab].Contents, mpos, delta, mods) {
-				return true
-			}
-		} else if scrollEditable(item.Contents, mpos, delta, mods) {
+		if ctx.scrollEditable(item.activeContents(), mpos, delta, mods) {
 			return true
 		}
 	}
@@ -389,12 +444,12 @@ func scrollEditable(items []*itemData, mpos, delta point, mods inputkeys.Modifie
 
 // SetWordWrap changes only presentation, retaining the draft, selection and undo.
 func (item *itemData) SetWordWrap(enabled bool) {
-	if item.WordWrap == enabled {
+	if item == nil || item.ItemType != ITEM_INPUT && !(item.ItemType == ITEM_TEXT && item.EditableText) || item.WordWrap == enabled {
 		return
 	}
+	item.CancelComposition()
 	item.WordWrap = enabled
 	state := item.editor()
-	state.layout = nil
 	state.scroll.X = 0
 	state.caretUpstream, state.hasPreferredX = false, false
 	item.resetCaret()
@@ -403,11 +458,13 @@ func (item *itemData) SetWordWrap(enabled bool) {
 // Keep source offsets and tab expansion while breaking at whitespace when
 // possible. Long tokens break only between graphemes, never inside one.
 func wrapEditLine(line editTextLine, raw string, face text.Face, width float32) []editTextLine {
+	return appendWrappedEditLine(nil, line, raw, face, width)
+}
+func appendWrappedEditLine(rows []editTextLine, line editTextLine, raw string, face text.Face, width float32) []editTextLine {
 	if line.width <= width || line.length == 0 {
-		return []editTextLine{line}
+		return append(rows, line)
 	}
 	runes := []rune(raw)
-	var rows []editTextLine
 	for first := 0; first < len(line.stops)-1; {
 		start := line.stops[first]
 		measure := func(last int) float32 {
@@ -440,6 +497,7 @@ func wrapEditLine(line editTextLine, raw string, face text.Face, width float32) 
 		}
 		end := line.stops[last]
 		row := editTextLine{start: line.start + start, length: end - start,
+			bytes: make([]int, 0, end-start+1), stops: make([]int, 0, last-first+1),
 			display: line.display[line.bytes[start]:line.bytes[end]], softBreak: end < line.length}
 		for _, b := range line.bytes[start : end+1] {
 			row.bytes = append(row.bytes, b-line.bytes[start])

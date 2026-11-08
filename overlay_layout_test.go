@@ -3,17 +3,19 @@ package eui
 import "testing"
 
 func TestOverlayChildrenShareOneOrigin(t *testing.T) {
-	oldScale := UIScale()
-	t.Cleanup(func() { SetUIScale(oldScale) })
-	SetUIScale(1)
+	ctx := newTestContext(t)
 
-	background, _ := NewButton()
+	oldScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(oldScale) })
+	ctx.SetUIScale(1)
+
+	background, _ := ctx.NewButton()
 	background.Size = Point{X: 100, Y: 24}
 	background.Position = Point{}
-	action, _ := NewButton()
+	action, _ := ctx.NewButton()
 	action.Size = Point{X: 20, Y: 24}
 	action.Position = Point{X: 80}
-	overlay := NewOverlay(background, action)
+	overlay := ctx.NewOverlay(background, action)
 	overlay.Fixed = true
 	overlay.Size = Point{X: 100, Y: 24}
 

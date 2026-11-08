@@ -3,10 +3,12 @@ package eui
 import "testing"
 
 func TestSetItemsReparentsChildren(t *testing.T) {
-	win := NewWindow()
-	parent := &itemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}
-	oldChild, _ := NewText()
-	newChild, _ := NewText()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
+	parent := &itemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}
+	oldChild, _ := ctx.NewText()
+	newChild, _ := ctx.NewText()
 	parent.AddItem(oldChild)
 	win.AddItem(parent)
 

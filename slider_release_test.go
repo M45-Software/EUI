@@ -3,6 +3,8 @@ package eui
 import "testing"
 
 func TestSliderReleaseEventRequiresChangedValue(t *testing.T) {
+	ctx := newTestContext(t)
+
 	releases := 0
 	handler := newHandler()
 	handler.Handle = func(ev UIEvent) {
@@ -10,7 +12,7 @@ func TestSliderReleaseEventRequiresChangedValue(t *testing.T) {
 			releases++
 		}
 	}
-	item := &itemData{
+	item := &itemData{ctx: ctx,
 		ItemType:       ITEM_SLIDER,
 		Value:          1,
 		dragStartValue: 1,

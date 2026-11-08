@@ -13,6 +13,8 @@ import (
 )
 
 func TestRenderColorTextCache(t *testing.T) {
+	ctx := newTestContext(t)
+
 	path := os.Getenv("EUI_COLOR_FONT")
 	if path == "" {
 		t.Skip("set EUI_COLOR_FONT to a color emoji font; run alone")
@@ -25,18 +27,18 @@ func TestRenderColorTextCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
 	emoji := text.NewLimitedFace(&text.GoTextFace{Source: source, Size: 24})
 	emoji.AddUnicodeRange(0x80, 0x10ffff)
-	face, err := text.NewMultiFace(emoji, textFace(24))
+	face, err := text.NewMultiFace(emoji, ctx.textFace(24))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plainUIText.clear()
-	defer plainUIText.clear()
-	g := &colorTextCacheGame{face: face}
+	ctx.plainUIText.clear()
+	defer ctx.plainUIText.clear()
+	g := &colorTextCacheGame{ctx: ctx, face: face}
 	ebiten.SetWindowVisible(false)
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
@@ -47,6 +49,8 @@ func TestRenderColorTextCache(t *testing.T) {
 }
 
 type colorTextCacheGame struct {
+	ctx *Context
+
 	face text.Face
 	done bool
 	err  error
@@ -67,6 +71,8 @@ func (g *colorTextCacheGame) Draw(*ebiten.Image) {
 	g.err = g.verify()
 }
 func (g *colorTextCacheGame) verify() error {
+	ctx := g.ctx
+
 	a, b := ebiten.NewImage(360, 120), ebiten.NewImage(360, 120)
 	defer a.Deallocate()
 	defer b.Deallocate()
@@ -81,7 +87,7 @@ func (g *colorTextCacheGame) verify() error {
 				a.Clear()
 				b.Clear()
 				text.Draw(a, value, g.face, op)
-				drawCachedUIText(b, value, g.face, op)
+				ctx.drawCachedUIText(b, value, g.face, op)
 				a.ReadPixels(ap)
 				b.ReadPixels(bp)
 				for i := range ap {
@@ -92,7 +98,7 @@ func (g *colorTextCacheGame) verify() error {
 			}
 		}
 	}
-	if plainUIText.hits < 6 {
+	if ctx.plainUIText.hits < 6 {
 		return fmt.Errorf("composed text did not reuse cached images")
 	}
 	return nil

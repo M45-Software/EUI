@@ -10,11 +10,13 @@ import (
 // DumpCachedImages writes all cached item images and item source images
 // to the debug directory. The game must be running so pixels can be read.
 // Any pending renders are generated before writing the files.
-func DumpCachedImages() error {
+func (ctx *Context) DumpCachedImages() error {
+	ctx.mustAlive()
+
 	if err := os.MkdirAll("debug", 0755); err != nil {
 		return err
 	}
-	for i, win := range windows {
+	for i, win := range ctx.windows {
 		dumpItemImages(win.Contents, fmt.Sprintf("window_%d", i))
 	}
 	return nil

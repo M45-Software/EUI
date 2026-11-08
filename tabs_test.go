@@ -9,10 +9,12 @@ import (
 )
 
 func TestSelectedTabIndicatorMatchesTabBoundsAndSurface(t *testing.T) {
-	previousScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = previousScale })
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatalf("font source: %v", err)
 	}
 
@@ -22,7 +24,7 @@ func TestSelectedTabIndicatorMatchesTabBoundsAndSurface(t *testing.T) {
 	theme.Tab.ClickColor = NewColor(70, 80, 90, 255)
 	theme.Tab.Border = 0
 	theme.Tab.ActiveOutline = true
-	flow := &itemData{
+	flow := &itemData{ctx: ctx,
 		ItemType:      ITEM_FLOW,
 		FlowType:      FLOW_VERTICAL,
 		Fixed:         true,
@@ -31,24 +33,26 @@ func TestSelectedTabIndicatorMatchesTabBoundsAndSurface(t *testing.T) {
 		Theme:         &theme,
 		ActiveOutline: true,
 		ActiveTab:     1,
-		Tabs:          []*itemData{{Name: "First", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}, {Name: "Second", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}},
+		Tabs:          []*itemData{{ctx: ctx, Name: "First", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}, {ctx: ctx, Name: "Second", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}},
 	}
-	layout, _ := layoutTabs(flow, &theme.Tab)
+	layout, _ := ctx.layoutTabs(flow, &theme.Tab)
 	active := layout[flow.ActiveTab]
 	wantIndicator := rect{X0: active.X0, Y0: active.Y0, X1: active.X1, Y1: active.Y0 + 3}
-	if got := tabIndicatorClip(point{X: active.X0, Y: active.Y0}, point{X: active.X1 - active.X0, Y: 24}); got != wantIndicator {
+	if got := ctx.tabIndicatorClip(point{X: active.X0, Y: active.Y0}, point{X: active.X1 - active.X0, Y: 24}); got != wantIndicator {
 		t.Fatalf("indicator clip = %v, want tab-top clip %v", got, wantIndicator)
 	}
-	if got, want := tabSurfaceColor(flow.Tabs[flow.ActiveTab], flow.ActiveTab, flow.ActiveTab, &theme.Tab), NewColor(43, 53, 63, 255); got != want {
+	if got, want := ctx.tabSurfaceColor(flow.Tabs[flow.ActiveTab], flow.ActiveTab, flow.ActiveTab, &theme.Tab), NewColor(43, 53, 63, 255); got != want {
 		t.Fatalf("selected tab background = %v, want lightly accented surface %v", got, want)
 	}
 }
 
 func TestTabRenderingUsesThemeFontAndSurfaceColor(t *testing.T) {
-	previousScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = previousScale })
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatalf("font source: %v", err)
 	}
 	theme := *baseTheme
@@ -58,7 +62,7 @@ func TestTabRenderingUsesThemeFontAndSurfaceColor(t *testing.T) {
 	theme.Tab.TextColor = NewColor(255, 255, 255, 255)
 	theme.Tab.OutlineColor = theme.Tab.Color
 
-	flow := &itemData{
+	flow := &itemData{ctx: ctx,
 		ItemType: ITEM_FLOW,
 		FlowType: FLOW_VERTICAL,
 		Fixed:    true,
@@ -66,12 +70,12 @@ func TestTabRenderingUsesThemeFontAndSurfaceColor(t *testing.T) {
 		Size:     point{X: 236, Y: 100},
 		Theme:    &theme,
 		Tabs: []*itemData{
-			{Name: "View", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
-			{Name: "Snells", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
-			{Name: "Sprites", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, Name: "View", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, Name: "Snells", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, Name: "Sprites", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
 		},
 	}
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.Size = point{X: 236, Y: 100}
 	win.AddItem(flow)
 	if got, want := flowFillColor(flow, &theme.Tab), theme.Tab.Color; got != want {
@@ -95,19 +99,21 @@ func TestTabRenderingUsesThemeFontAndSurfaceColor(t *testing.T) {
 }
 
 func TestTabContentBoundsIncludeTabStrip(t *testing.T) {
-	previousScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = previousScale })
+	ctx := newTestContext(t)
 
-	content := &itemData{
+	previousScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+
+	content := &itemData{ctx: ctx,
 		ItemType: ITEM_TEXT,
 		Size:     point{X: 200, Y: 40},
 	}
-	flow := &itemData{
+	flow := &itemData{ctx: ctx,
 		ItemType: ITEM_FLOW,
 		FlowType: FLOW_VERTICAL,
 		Tabs: []*itemData{
-			{Name: "General", Contents: []*itemData{content}},
+			{ctx: ctx, Name: "General", Contents: []*itemData{content}},
 		},
 	}
 
@@ -119,20 +125,22 @@ func TestTabContentBoundsIncludeTabStrip(t *testing.T) {
 }
 
 func TestTabDrawRectsUseScreenCoordinates(t *testing.T) {
-	previousScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = previousScale })
-	flow := &itemData{
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	flow := &itemData{ctx: ctx,
 		ItemType: ITEM_FLOW,
 		FlowType: FLOW_VERTICAL,
 		Fixed:    true,
 		Size:     point{X: 200, Y: 120},
 		Tabs: []*itemData{
-			{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
-			{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
 		},
 	}
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.Size = point{X: 300, Y: 200}
 	win.AddItem(flow)
 
@@ -166,19 +174,21 @@ func TestTabDrawRectsUseScreenCoordinates(t *testing.T) {
 }
 
 func TestTabClickRefreshesAndResetsTheActiveFlow(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	win.Open = true
 	win.Size = point{X: 300, Y: 200}
 
-	flow := &itemData{
+	flow := &itemData{ctx: ctx,
 		ItemType: ITEM_FLOW,
 		FlowType: FLOW_VERTICAL,
 		Fixed:    true,
 		Size:     point{X: 200, Y: 120},
 		Scroll:   point{X: 0, Y: 40},
 		Tabs: []*itemData{
-			{Name: "View", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
-			{Name: "Sprites", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, Name: "View", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
+			{ctx: ctx, Name: "Sprites", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL},
 		},
 	}
 	win.AddItem(flow)
@@ -200,31 +210,33 @@ func TestTabClickRefreshesAndResetsTheActiveFlow(t *testing.T) {
 }
 
 func TestStaggeredTabsReserveSpaceAndHandleSecondRowClicks(t *testing.T) {
-	previousScale := uiScale
-	t.Cleanup(func() { uiScale = previousScale })
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
 	for _, scale := range []float32{1, 1.3, 2} {
-		uiScale = scale
-		content := &itemData{ItemType: ITEM_TEXT, Size: point{X: 400, Y: 40}}
-		flow := &itemData{
+		ctx.uiScale = scale
+		content := &itemData{ctx: ctx, ItemType: ITEM_TEXT, Size: point{X: 400, Y: 40}}
+		flow := &itemData{ctx: ctx,
 			ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true,
 			Size: point{X: 440, Y: 160}, TabColumns: 3, TabRowOffset: 16,
 			Tabs: []*itemData{
-				{Name: "Display", Contents: []*itemData{content}}, {Name: "Audio"}, {Name: "Text"},
-				{Name: "Controls"}, {Name: "Files"}, {Name: "Network"},
+				{ctx: ctx, Name: "Display", Contents: []*itemData{content}}, {ctx: ctx, Name: "Audio"}, {ctx: ctx, Name: "Text"},
+				{ctx: ctx, Name: "Controls"}, {ctx: ctx, Name: "Files"}, {ctx: ctx, Name: "Network"},
 			},
 		}
-		win := NewWindow()
+		win := ctx.NewWindow()
 		win.Size = point{X: 500, Y: 250}
 		win.AddItem(flow)
-		rowHeight := tabRowHeight(flow, flow.themeStyle())
+		rowHeight := ctx.tabRowHeight(flow, flow.themeStyle())
 		stripHeight := 2*rowHeight + 4*scale
 		if got := flow.contentBounds().Y; got != content.GetSize().Y+stripHeight {
 			t.Fatalf("content height at %.1fx = %v, want %v", scale, got, content.GetSize().Y+stripHeight)
 		}
-		if got := flow.contentBounds().X; got < max(content.GetSize().X, tabStripWidth(flow)) {
+		if got := flow.contentBounds().X; got < max(content.GetSize().X, ctx.tabStripWidth(flow)) {
 			t.Fatalf("content width at %.1fx = %v, missing staggered row space", scale, got)
 		}
 		screen := ebiten.NewImage(1200, 600)
@@ -243,22 +255,24 @@ func TestStaggeredTabsReserveSpaceAndHandleSecondRowClicks(t *testing.T) {
 }
 
 func TestTabWidthAlignsWrappedRows(t *testing.T) {
-	previousScale := uiScale
-	t.Cleanup(func() { uiScale = previousScale })
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
 	for _, scale := range []float32{1, 1.5, 2} {
-		uiScale = scale
-		flow := &itemData{
+		ctx.uiScale = scale
+		flow := &itemData{ctx: ctx,
 			ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL,
 			TabColumns: 3, TabWidth: 100,
 			Tabs: []*itemData{
-				{Name: "One"}, {Name: "Two"}, {Name: "Three"},
-				{Name: "Four"}, {Name: "Five"}, {Name: "Six"},
+				{ctx: ctx, Name: "One"}, {ctx: ctx, Name: "Two"}, {ctx: ctx, Name: "Three"},
+				{ctx: ctx, Name: "Four"}, {ctx: ctx, Name: "Five"}, {ctx: ctx, Name: "Six"},
 			},
 		}
-		layout, _ := layoutTabs(flow, flow.themeStyle())
+		layout, _ := ctx.layoutTabs(flow, flow.themeStyle())
 		for i, bounds := range layout {
 			if got, want := bounds.X1-bounds.X0, 100*scale; got != want {
 				t.Fatalf("tab %d width at %.1fx = %.1f, want %.1f", i, scale, got, want)
@@ -273,13 +287,15 @@ func TestTabWidthAlignsWrappedRows(t *testing.T) {
 }
 
 func TestTabLabelsFitFixedPanels(t *testing.T) {
-	previousScale := uiScale
-	t.Cleanup(func() { uiScale = previousScale })
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	previousScale := ctx.uiScale
+	t.Cleanup(func() { ctx.uiScale = previousScale })
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
 	for _, scale := range []float32{.75, 1, 1.25, 1.5, 2} {
-		uiScale = scale
+		ctx.uiScale = scale
 		for _, panel := range []struct {
 			width float32
 			names []string
@@ -287,13 +303,13 @@ func TestTabLabelsFitFixedPanels(t *testing.T) {
 			{236, []string{"View", "Snells", "Sprites"}},
 			{240, []string{"Artwork", "Lighting & Effects", "Power Saving"}},
 		} {
-			flow := &itemData{ItemType: ITEM_FLOW, Fixed: true, Size: point{X: panel.width, Y: 200}}
+			flow := &itemData{ctx: ctx, ItemType: ITEM_FLOW, Fixed: true, Size: point{X: panel.width, Y: 200}}
 			for _, name := range panel.names {
-				flow.Tabs = append(flow.Tabs, &itemData{Name: name})
+				flow.Tabs = append(flow.Tabs, &itemData{ctx: ctx, Name: name})
 			}
-			layout, size := layoutTabs(flow, flow.themeStyle())
+			layout, size := ctx.layoutTabs(flow, flow.themeStyle())
 			for i, r := range layout {
-				tw, _ := text.Measure(flow.Tabs[i].Name, itemFace(flow.Tabs[i], tabFontSize(flow, flow.themeStyle())*scale+2), 0)
+				tw, _ := text.Measure(flow.Tabs[i].Name, ctx.itemFace(flow.Tabs[i], tabFontSize(flow, flow.themeStyle())*scale+2), 0)
 				if r.X1 > panel.width*scale || r.X0 < 0 || r.X1-r.X0 < float32(tw)+16*scale {
 					t.Fatalf("%q at %.2fx does not fit panel/label: %v, text width %.1f", flow.Tabs[i].Name, scale, r, tw)
 				}
@@ -312,14 +328,16 @@ func TestTabLabelsFitFixedPanels(t *testing.T) {
 }
 
 func TestTabLayoutScratchTracksChangingTabsAndKeepsHitGeometry(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = oldScale })
-	flow := &itemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true, Size: point{X: 240, Y: 400}}
-	win := NewWindow()
+	oldScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = oldScale })
+	flow := &itemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true, Size: point{X: 240, Y: 400}}
+	win := ctx.NewWindow()
 	win.Open = true
 	win.Size = point{X: 300, Y: 450}
 	win.AddItem(flow)
@@ -331,13 +349,13 @@ func TestTabLayoutScratchTracksChangingTabsAndKeepsHitGeometry(t *testing.T) {
 	for _, names := range [][]string{{"One", "Two"}, {"Display", "Text", "Audio", "Controls"}, {"Files"}, {}, {"A renamed tab", "More"}} {
 		flow.Tabs = flow.Tabs[:0]
 		for _, name := range names {
-			flow.Tabs = append(flow.Tabs, &itemData{Name: name, ItemType: ITEM_FLOW})
+			flow.Tabs = append(flow.Tabs, &itemData{ctx: ctx, Name: name, ItemType: ITEM_FLOW})
 		}
 		flow.ActiveTab = 0
 		previous := rects[:cap(rects)]
 		var size point
-		rects, size = layoutTabsInto(rects, flow, flow.themeStyle())
-		if len(rects) != len(names) || size != measureTabLayout(flow, flow.themeStyle(), nil) {
+		rects, size = ctx.layoutTabsInto(rects, flow, flow.themeStyle())
+		if len(rects) != len(names) || size != ctx.measureTabLayout(flow, flow.themeStyle(), nil) {
 			t.Fatalf("layout retained stale tabs or bounds for %v", names)
 		}
 		if len(rects) > 0 && len(rects) <= len(previous) && &rects[0] != &previous[0] {

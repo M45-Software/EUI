@@ -93,9 +93,9 @@ func (c Color) MarshalJSON() ([]byte, error) {
 	}{[4]float64{h, s, v, a}})
 }
 
-// UnmarshalJSON accepts HSV, RGBA objects or a string. Strings may reference a
-// named color from the theme, a hex RGB(A) value like "#RRGGBB" or
-// comma-separated HSV components "h,s,v".
+// UnmarshalJSON accepts HSV, RGBA objects or a string. Strings accept a
+// hex RGB(A) value like "#RRGGBB" or comma-separated HSV components "h,s,v".
+// Use Context.ParseColor to resolve a name from a particular palette.
 func (c *Color) UnmarshalJSON(data []byte) error {
 	var hstruct struct {
 		HSV [4]float64 `json:"HSV"`
@@ -112,10 +112,6 @@ func (c *Color) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		s = strings.TrimSpace(s)
-		if nc, ok := namedColors[strings.ToLower(s)]; ok {
-			*c = nc
-			return nil
-		}
 		if strings.HasPrefix(s, "#") {
 			hex := strings.TrimPrefix(s, "#")
 			if len(hex) == 6 || len(hex) == 8 {

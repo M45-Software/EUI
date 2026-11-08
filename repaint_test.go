@@ -8,8 +8,10 @@ import (
 )
 
 func TestBackgroundRepaintBudgetAndDeadline(t *testing.T) {
+	ctx := newTestContext(t)
+
 	now := time.Now()
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.NoScale, win.DeferRepaint, win.Dirty = true, true, true
 	win.Size = point{700, 980}
 	win.Render = ebiten.NewImage(700, 980)
@@ -38,9 +40,11 @@ func TestBackgroundRepaintBudgetAndDeadline(t *testing.T) {
 }
 
 func TestRepaintUrgencyAndInvalidCacheBypassBudget(t *testing.T) {
+	ctx := newTestContext(t)
+
 	for _, mode := range []string{"interaction", "resize", "first paint", "animation", "opt out"} {
 		t.Run(mode, func(t *testing.T) {
-			win := NewWindow()
+			win := ctx.NewWindow()
 			win.NoScale, win.DeferRepaint, win.Dirty = true, true, true
 			win.Size = point{700, 980}
 			win.Render = ebiten.NewImage(700, 980)

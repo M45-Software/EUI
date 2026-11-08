@@ -4,6 +4,8 @@ import (
 	"image"
 	"math"
 
+	"github.com/Distortions81/EUI/renderpool"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
@@ -29,26 +31,27 @@ type uiTextImage struct {
 	image  *ebiten.Image
 	bounds image.Rectangle
 	used   uint64
+	bytes  int
 }
 type uiTextCache struct {
+	targets      renderpool.Pool
 	entries      map[uiTextKey]uiTextImage
 	bytes        int
 	clock        uint64
 	hits, misses uint64
 }
 
-var plainUIText uiTextCache
-
 func (cache *uiTextCache) clear() {
 	for _, entry := range cache.entries {
-		entry.image.Deallocate()
+		cache.targets.Release(entry.image)
 	}
+	cache.targets.Clear()
 	*cache = uiTextCache{}
 }
 
 // Only called with translation-only, nearest-filtered
 // DrawOptions. Store actual glyph bounds, including overhangs and diacritics.
-func drawCachedUIText(dst *ebiten.Image, value string, face text.Face, op *text.DrawOptions) {
+func (ctx *Context) drawCachedUIText(dst *ebiten.Image, value string, face text.Face, op *text.DrawOptions) {
 	if value == "" {
 		return
 	}
@@ -66,7 +69,7 @@ func drawCachedUIText(dst *ebiten.Image, value string, face text.Face, op *text.
 	} else {
 		key.composedFace = face
 	}
-	cache := &plainUIText
+	cache := &ctx.plainUIText
 	cache.clock++
 	entry, cached := cache.entries[key]
 	if cached {
@@ -102,21 +105,27 @@ func drawCachedUIText(dst *ebiten.Image, value string, face text.Face, op *text.
 			}
 			return
 		}
-		bytes := bounds.Dx() * bounds.Dy() * 4
-		for len(cache.entries) >= maxUITextEntries || cache.bytes+bytes > maxUITextBytes {
-			var oldestKey uiTextKey
-			oldest := cache.clock
-			for k, candidate := range cache.entries {
-				if candidate.used < oldest {
-					oldestKey, oldest = k, candidate.used
+		if cache.targets.NewImage == nil {
+			cache.targets = renderpool.Pool{MaxFreeBytes: 1 << 20, NewImage: func(w, h int, unmanaged bool) *ebiten.Image {
+				if unmanaged {
+					return ctx.newUnmanagedImage(w, h)
 				}
-			}
-			victim := cache.entries[oldestKey]
-			victim.image.Deallocate()
-			cache.bytes -= victim.bounds.Dx() * victim.bounds.Dy() * 4
-			delete(cache.entries, oldestKey)
+				return ctx.newManagedImage(w, h)
+			}}
 		}
-		entry = uiTextImage{image: newManagedImage(bounds.Dx(), bounds.Dy()), bounds: bounds}
+		// Account for the backing allocation, including size-class padding. Keep
+		// a separate, small idle reserve so scrolling can reuse evicted textures.
+		bytes := int(renderpool.BytesForSize(bounds.Dx(), bounds.Dy(), ctx.potatoMode))
+		for len(cache.entries) >= maxUITextEntries || cache.bytes+bytes > maxUITextBytes {
+			cache.evictOldest()
+		}
+		img := cache.targets.Acquire(bounds.Dx(), bounds.Dy(), ctx.potatoMode)
+		bytes = int(cache.targets.Bytes(img))
+		// A reusable allocation may be larger than the requested size class.
+		for cache.bytes+bytes > maxUITextBytes {
+			cache.evictOldest()
+		}
+		entry = uiTextImage{image: img, bounds: bounds, bytes: bytes}
 		drawOp := op.DrawImageOptions
 		for _, glyph := range glyphs {
 			if glyph.Image == nil {
@@ -145,4 +154,18 @@ func setGlyphColorScale(op *ebiten.DrawImageOptions, tint ebiten.ColorScale, col
 		op.ColorScale.Reset()
 		op.ColorScale.ScaleAlpha(tint.A())
 	}
+}
+
+func (cache *uiTextCache) evictOldest() {
+	var oldestKey uiTextKey
+	oldest := cache.clock
+	for key, candidate := range cache.entries {
+		if candidate.used < oldest {
+			oldestKey, oldest = key, candidate.used
+		}
+	}
+	victim := cache.entries[oldestKey]
+	cache.targets.Release(victim.image)
+	cache.bytes -= victim.bytes
+	delete(cache.entries, oldestKey)
 }

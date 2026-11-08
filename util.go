@@ -4,26 +4,22 @@ import (
 	"image/color"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
-var (
-	strokeLineFn = vector.StrokeLine
-	strokeRectFn = vector.StrokeRect
-)
-
 func (item *itemData) themeStyle() *itemData {
+	ctx := item.ui()
+
 	if item == nil {
 		return nil
 	}
 
 	th := item.Theme
 	if th == nil {
-		th = currentTheme
+		th = ctx.currentTheme
 	}
 	if th == nil {
 		return nil
@@ -98,58 +94,22 @@ func (win *windowData) getWinRect() rect {
 }
 
 func (parent *itemData) addItemTo(item *itemData) {
-	item.Parent = parent
-	if item.Theme == nil {
-		item.Theme = parent.Theme
+	if parent == nil || item == nil {
+		return
 	}
-	item.setParentWindow(parent.ParentWindow)
-	parent.Contents = append(parent.Contents, item)
-	if parent.ItemType == ITEM_FLOW {
-		parent.resizeFlow(parent.GetSize())
-	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-	}
+	parent.insertItem(len(parent.Contents), item)
 }
 
-func (parent *itemData) prependItemTo(item *itemData) {
-	item.Parent = parent
-	if item.Theme == nil {
-		item.Theme = parent.Theme
-	}
-	item.setParentWindow(parent.ParentWindow)
-	parent.Contents = append([]*itemData{item}, parent.Contents...)
-	if parent.ItemType == ITEM_FLOW {
-		parent.resizeFlow(parent.GetSize())
-	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-	}
-}
+func (parent *itemData) prependItemTo(item *itemData) { parent.insertItem(0, item) }
 
 func (parent *windowData) addItemTo(item *itemData) {
-	if item.Theme == nil {
-		item.Theme = parent.Theme
+	if parent == nil || item == nil {
+		return
 	}
-	item.Parent = nil
-	parent.Contents = append(parent.Contents, item)
-	item.setParentWindow(parent)
-	parent.updateHasIndeterminate()
-	item.resizeFlow(parent.GetSize())
-	parent.markDirty()
+	parent.insertItem(len(parent.Contents), item)
 }
 
-func (parent *windowData) prependItemTo(item *itemData) {
-	if item.Theme == nil {
-		item.Theme = parent.Theme
-	}
-	item.Parent = nil
-	parent.Contents = append([]*itemData{item}, parent.Contents...)
-	item.setParentWindow(parent)
-	parent.updateHasIndeterminate()
-	item.resizeFlow(parent.GetSize())
-	parent.markDirty()
-}
+func (parent *windowData) prependItemTo(item *itemData) { parent.insertItem(0, item) }
 
 func (item *itemData) detach() {
 	if item == nil {
@@ -162,7 +122,7 @@ func (item *itemData) detach() {
 }
 
 func (parent *itemData) removeItem(child *itemData) {
-	if child == nil {
+	if parent == nil || child == nil {
 		return
 	}
 	for i, it := range parent.Contents {
@@ -171,59 +131,72 @@ func (parent *itemData) removeItem(child *itemData) {
 			parent.Contents[len(parent.Contents)-1] = nil
 			parent.Contents = parent.Contents[:len(parent.Contents)-1]
 			child.detach()
-			break
+			parent.runtimeChanged(true)
+			return
 		}
-	}
-	if parent.ItemType == ITEM_FLOW {
-		parent.resizeFlow(parent.GetSize())
-	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-		parent.ParentWindow.markDirty()
 	}
 }
 
 func (parent *itemData) setItems(children []*itemData) {
+	if parent != nil {
+		parent.ui().bindItems(children)
+	}
 	if parent == nil {
 		return
 	}
-	oldContents := parent.Contents
+	next := make([]*itemData, 0, len(children))
 	retained := make(map[*itemData]bool, len(children))
 	for _, child := range children {
-		retained[child] = true
+		if child != nil {
+			next = append(next, child)
+			retained[child] = true
+		}
 	}
-	for _, child := range oldContents {
-		if child != nil && child.Parent == parent {
-			if !retained[child] {
-				child.detach()
+	previous := parent.Contents
+	unchanged := len(next) == len(previous)
+	if unchanged {
+		for i, child := range next {
+			if child != previous[i] || child.Parent != parent || child.ParentWindow != parent.ParentWindow {
+				unchanged = false
+				break
 			}
 		}
 	}
-	parent.Contents = append(oldContents[:0], children...)
-	for i := len(parent.Contents); i < len(oldContents); i++ {
-		oldContents[i] = nil
+	if unchanged {
+		parent.Contents = next
+		return
+	}
+	// Commit the new list before dismissal callbacks can inspect or append to it.
+	parent.Contents = next
+	for _, child := range previous {
+		if child != nil && child.Parent == parent && !retained[child] {
+			child.detach()
+		}
 	}
 	for _, child := range parent.Contents {
-		if child == nil {
-			continue
-		}
 		child.Parent = parent
 		if child.Theme == nil {
 			child.Theme = parent.Theme
 		}
 		child.setParentWindow(parent.ParentWindow)
 	}
-	if parent.ItemType == ITEM_FLOW {
-		parent.resizeFlow(parent.GetSize())
+	parent.runtimeChanged(true)
+}
+
+func (parent *windowData) contentsChanged() {
+	if parent.Open {
+		parent.RefreshWithReason("items")
+		parent.Dirty = true
+		parent.refreshPending = false
+	} else {
+		parent.resizeFlows()
+		parent.markDirty()
 	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-		parent.ParentWindow.markDirty()
-	}
+	parent.updateHasIndeterminate()
 }
 
 func (parent *windowData) removeItem(child *itemData) {
-	if child == nil {
+	if parent == nil || child == nil {
 		return
 	}
 	for i, it := range parent.Contents {
@@ -232,114 +205,125 @@ func (parent *windowData) removeItem(child *itemData) {
 			parent.Contents[len(parent.Contents)-1] = nil
 			parent.Contents = parent.Contents[:len(parent.Contents)-1]
 			child.detach()
-			break
+			parent.contentsChanged()
+			return
 		}
 	}
-	parent.updateHasIndeterminate()
-	parent.markDirty()
 }
 
 func (parent *itemData) insertItem(idx int, child *itemData) {
+	if parent != nil {
+		parent.ui().bindItems([]*itemData{child})
+	}
 	if parent == nil || child == nil {
 		return
 	}
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(parent.Contents) {
-		idx = len(parent.Contents)
-	}
+	idx = max(0, min(idx, len(parent.Contents)))
+	parent.Contents = append(parent.Contents, nil)
+	copy(parent.Contents[idx+1:], parent.Contents[idx:])
+	parent.Contents[idx] = child
 	child.Parent = parent
 	if child.Theme == nil {
 		child.Theme = parent.Theme
 	}
 	child.setParentWindow(parent.ParentWindow)
-	parent.Contents = append(parent.Contents, nil)
-	copy(parent.Contents[idx+1:], parent.Contents[idx:])
-	parent.Contents[idx] = child
-	if parent.ItemType == ITEM_FLOW {
-		child.resizeFlow(parent.GetSize())
-	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-		parent.ParentWindow.markDirty()
-	}
+	parent.runtimeChanged(true)
 }
 
 func (parent *windowData) insertItem(idx int, child *itemData) {
+	if parent != nil {
+		parent.ui().bindItems([]*itemData{child})
+	}
 	if parent == nil || child == nil {
 		return
 	}
-	if child.Theme == nil {
-		child.Theme = parent.Theme
-	}
-	if idx < 0 {
-		idx = 0
-	}
-	if idx > len(parent.Contents) {
-		idx = len(parent.Contents)
-	}
+	idx = max(0, min(idx, len(parent.Contents)))
 	parent.Contents = append(parent.Contents, nil)
 	copy(parent.Contents[idx+1:], parent.Contents[idx:])
 	parent.Contents[idx] = child
 	child.Parent = nil
+	if child.Theme == nil {
+		child.Theme = parent.Theme
+	}
 	child.setParentWindow(parent)
-	parent.updateHasIndeterminate()
-	parent.markDirty()
+	parent.contentsChanged()
 }
 
 func (parent *itemData) replaceItem(idx int, child *itemData) {
-	if parent == nil || child == nil || idx < 0 || idx >= len(parent.Contents) {
+	if parent != nil {
+		parent.ui().bindItems([]*itemData{child})
+	}
+	if parent == nil || child == nil || idx < 0 || idx >= len(parent.Contents) || parent.Contents[idx] == child {
 		return
 	}
-	old := parent.Contents[idx]
+	previous := parent.Contents[idx]
+	parent.Contents[idx] = child
+	if previous != nil {
+		previous.detach()
+	}
 	child.Parent = parent
 	if child.Theme == nil {
 		child.Theme = parent.Theme
 	}
 	child.setParentWindow(parent.ParentWindow)
-	parent.Contents[idx] = child
-	if parent.ItemType == ITEM_FLOW {
-		child.resizeFlow(parent.GetSize())
-	}
-	if old != nil && old != child {
-		old.detach()
-	}
-	if parent.ParentWindow != nil {
-		parent.ParentWindow.updateHasIndeterminate()
-		parent.ParentWindow.markDirty()
-	}
+	parent.runtimeChanged(true)
 }
 
 func (parent *windowData) replaceItem(idx int, child *itemData) {
-	if parent == nil || child == nil || idx < 0 || idx >= len(parent.Contents) {
+	if parent != nil {
+		parent.ui().bindItems([]*itemData{child})
+	}
+	if parent == nil || child == nil || idx < 0 || idx >= len(parent.Contents) || parent.Contents[idx] == child {
 		return
 	}
-	old := parent.Contents[idx]
+	previous := parent.Contents[idx]
+	parent.Contents[idx] = child
+	if previous != nil {
+		previous.detach()
+	}
+	child.Parent = nil
 	if child.Theme == nil {
 		child.Theme = parent.Theme
 	}
-	parent.Contents[idx] = child
-	child.Parent = nil
 	child.setParentWindow(parent)
-	if old != nil && old != child {
-		old.detach()
-	}
-	parent.updateHasIndeterminate()
-	parent.markDirty()
+	parent.contentsChanged()
 }
 
-func (item *itemData) updateText(text string) {
-	if item == nil || item.Text == text {
+func (item *itemData) updateText(value string) {
+	if item == nil {
 		return
 	}
-	item.Text = text
-	item.tooltipW = 0
-	item.tooltipH = 0
-	item.markDirty()
-	if item.ParentWindow != nil {
-		item.ParentWindow.Refresh()
+	if item.wrappedLabel != nil {
+		item.SetWrappedText(value)
+		return
 	}
+	editing := item.ItemType == ITEM_INPUT || item.ItemType == ITEM_TEXT && item.EditableText
+	previous := item.Text
+	if editing && item.HideText {
+		previous = item.SecretText
+	}
+	if item.TextPtr != nil && (!item.HideText || item.TextPtr != &item.Text) {
+		*item.TextPtr = value
+	}
+	if previous == value {
+		return
+	}
+	if editing {
+		item.CancelComposition()
+		item.editor()
+		item.setEditedText(value)
+		// Programmatic replacement starts a fresh history, unlike ReplaceText.
+		item.textEdit = &textEditState{known: value, runeCount: len([]rune(value)), initialized: true, caretOn: true, followCaret: true}
+	} else {
+		item.Text = value
+	}
+	n := len([]rune(value))
+	item.CursorPos = max(0, min(item.CursorPos, n))
+	item.SelectStart = max(0, min(item.SelectStart, n))
+	item.SelectEnd = max(0, min(item.SelectEnd, n))
+	item.selecting = false
+	item.tooltipW, item.tooltipH = 0, 0
+	item.runtimeChanged(!editing)
 }
 
 func (win *windowData) getMainRect() rect {
@@ -436,19 +420,10 @@ func (win *windowData) searchBoxRect() rect {
 	}
 	var xpad float32 = win.Border * win.scale()
 	size := win.GetTitleSize()
-	textSize := size / 2
-	face := textFace(textSize)
-	w, _ := text.Measure(win.SearchText, face, 0)
-	maxW, _ := text.Measure(strings.Repeat("W", 64), face, 0)
-	width := float32(w) + size
-	if float64(width) > maxW+float64(size) {
-		width = float32(maxW) + size
-	}
-	if width < size*2 {
-		width = size * 2
-	}
+	width := max(180*win.scale(), size*2)
 	sr := win.searchRect()
 	x1 := sr.X0 - xpad
+	width = min(width, max(0, x1-win.getPosition().X-xpad))
 	x0 := x1 - width
 	y0 := win.getPosition().Y + xpad
 	y1 := y0 + size - xpad*2
@@ -466,9 +441,15 @@ func (win *windowData) searchCloseRect() rect {
 
 // closeSearch resets the search state and clears highlights.
 func (win *windowData) closeSearch() {
+	ctx := win.ui()
+
+	if win.searchInput != nil {
+		win.searchInput.clearHiddenState()
+		win.searchInput.UpdateText("")
+	}
 	win.searchOpen = false
-	if activeSearch == win {
-		activeSearch = nil
+	if ctx.activeSearch == win {
+		ctx.activeSearch = nil
 	}
 	win.SearchText = ""
 	if win.OnSearch != nil {
@@ -626,6 +607,9 @@ func (win *windowData) RefreshWithReason(reason string) {
 	win.Scroll = savedWinScroll
 	restoreScroll(win.Contents, savedFlows)
 	win.adjustScrollForResize()
+	for _, item := range win.Contents {
+		markItemTreeDirty(item)
+	}
 	win.markDirty()
 	win.repaintReason = reason
 }
@@ -657,6 +641,11 @@ func (win *windowData) setSize(size point) bool {
 
 	win.BringForward()
 	win.resizeFlows()
+	if old != size {
+		for _, item := range win.Contents {
+			markItemTreeDirty(item)
+		}
+	}
 	win.adjustScrollForResize()
 	if win.zone != nil {
 		win.updateZonePosition()
@@ -704,6 +693,8 @@ func (win *windowData) adjustScrollForResize() {
 }
 
 func (win *windowData) clampToScreen() {
+	ctx := win.ui()
+
 	pos := win.getPosition()
 	size := win.GetSize()
 	old := win.Position
@@ -712,14 +703,14 @@ func (win *windowData) clampToScreen() {
 	// Ensure window size never exceeds the screen bounds. If it does,
 	// shrink the window so it can be fully clamped on-screen.
 	sizeChanged := false
-	if size.X > float32(screenWidth) {
-		win.Size.X = float32(screenWidth) / s
-		size.X = float32(screenWidth)
+	if size.X > float32(ctx.screenWidth) {
+		win.Size.X = float32(ctx.screenWidth) / s
+		size.X = float32(ctx.screenWidth)
 		sizeChanged = true
 	}
-	if size.Y > float32(screenHeight) {
-		win.Size.Y = float32(screenHeight) / s
-		size.Y = float32(screenHeight)
+	if size.Y > float32(ctx.screenHeight) {
+		win.Size.Y = float32(ctx.screenHeight) / s
+		size.Y = float32(ctx.screenHeight)
 		sizeChanged = true
 	}
 
@@ -732,11 +723,11 @@ func (win *windowData) clampToScreen() {
 		pos.Y = 0
 	}
 
-	overX := pos.X + size.X - float32(screenWidth)
+	overX := pos.X + size.X - float32(ctx.screenWidth)
 	if overX > 0 {
 		win.Position.X -= overX / s
 	}
-	overY := pos.Y + size.Y - float32(screenHeight)
+	overY := pos.Y + size.Y - float32(ctx.screenHeight)
 	if overY > 0 {
 		win.Position.Y -= overY / s
 	}
@@ -813,8 +804,8 @@ func (win *windowData) SetDocked(docked bool) {
 
 // Update cached title bars on both hover entry and exit, including windows
 // covered by another window or an open menu. Drawing never consumes this state.
-func updateCloseHover(orderedWindows []*windowData, mpos point) {
-	blocked := contextMenuContainsAnywhere(mpos) || dropdownOpenContainsAnywhere(mpos)
+func (ctx *Context) updateCloseHover(orderedWindows []*windowData, mpos point) {
+	blocked := ctx.contextMenuContainsAnywhere(mpos) || ctx.dropdownOpenContainsAnywhere(mpos)
 	for _, win := range orderedWindows {
 		hover := false
 		if !blocked && win.Open && win.getWinRect().containsPoint(mpos) {
@@ -920,13 +911,15 @@ func (win *windowData) getResizePart(mpos point) dragType {
 }
 
 func (win *windowData) getScrollbarPart(mpos point) dragType {
+	ctx := win.ui()
+
 	if win.NoScroll {
 		return PART_NONE
 	}
 	// Measuring nested content (including every tab label) is expensive.
 	// Only resolve thumb positions when the pointer could hit a scrollbar.
 	position, size := win.getPosition(), win.GetSize()
-	sbW := currentStyle.BorderPad.Slider * 2
+	sbW := ctx.currentStyle.BorderPad.Slider * 2
 	right, bottom := position.X+size.X-win.BorderPad, position.Y+size.Y-win.BorderPad
 	vertical := rect{X0: right - sbW, Y0: position.Y, X1: right, Y1: position.Y + size.Y}
 	horizontal := rect{X0: position.X, Y0: bottom - sbW, X1: position.X + size.X, Y1: bottom}
@@ -947,7 +940,7 @@ func (win *windowData) getScrollbarPart(mpos point) dragType {
 		if maxScroll > 0 {
 			pos = (win.Scroll.Y / maxScroll) * (avail.Y - barH)
 		}
-		sbW := currentStyle.BorderPad.Slider * 2
+		sbW := ctx.currentStyle.BorderPad.Slider * 2
 		r := rect{
 			X0: win.getPosition().X + win.GetSize().X - win.BorderPad - sbW,
 			Y0: win.getPosition().Y + win.GetTitleSize() + win.BorderPad + pos,
@@ -965,7 +958,7 @@ func (win *windowData) getScrollbarPart(mpos point) dragType {
 		if maxScroll > 0 {
 			pos = (win.Scroll.X / maxScroll) * (avail.X - barW)
 		}
-		sbW := currentStyle.BorderPad.Slider * 2
+		sbW := ctx.currentStyle.BorderPad.Slider * 2
 		r := rect{
 			X0: win.getPosition().X + win.BorderPad + pos,
 			Y0: win.getPosition().Y + win.GetSize().Y - win.BorderPad - sbW,
@@ -980,15 +973,17 @@ func (win *windowData) getScrollbarPart(mpos point) dragType {
 }
 
 func (item *itemData) getScrollbarPart(mpos point) dragType {
+	ctx := item.ui()
+
 	if !item.Scrollable {
 		return PART_NONE
 	}
-	sbW := currentStyle.BorderPad.Slider * 2
+	sbW := ctx.currentStyle.BorderPad.Slider * 2
 	track := item.DrawRect
 	switch item.FlowType {
-	case FLOW_VERTICAL:
+	case FLOW_VERTICAL, FLOW_VERTICAL_REV:
 		track.X0 = track.X1 - sbW
-	case FLOW_HORIZONTAL:
+	case FLOW_HORIZONTAL, FLOW_HORIZONTAL_REV:
 		track.Y0 = track.Y1 - sbW
 	default:
 		return PART_NONE
@@ -999,14 +994,14 @@ func (item *itemData) getScrollbarPart(mpos point) dragType {
 
 	req := item.contentBounds()
 	size := item.GetSize()
-	if item.FlowType == FLOW_VERTICAL && req.Y > size.Y {
-		barH := scrollbarThumbLength(size.Y, req.Y, UIScale())
+	if item.verticalFlow() && req.Y > size.Y {
+		barH := scrollbarThumbLength(size.Y, req.Y, ctx.UIScale())
 		maxScroll := req.Y - size.Y
 		pos := float32(0)
 		if maxScroll > 0 {
 			pos = (item.Scroll.Y / maxScroll) * (size.Y - barH)
 		}
-		sbW := currentStyle.BorderPad.Slider * 2
+		sbW := ctx.currentStyle.BorderPad.Slider * 2
 		r := rect{
 			X0: item.DrawRect.X1 - sbW,
 			Y0: item.DrawRect.Y0 + pos,
@@ -1017,14 +1012,14 @@ func (item *itemData) getScrollbarPart(mpos point) dragType {
 			return PART_SCROLL_V
 		}
 	}
-	if item.FlowType == FLOW_HORIZONTAL && req.X > size.X {
-		barW := scrollbarThumbLength(size.X, req.X, UIScale())
+	if item.horizontalFlow() && req.X > size.X {
+		barW := scrollbarThumbLength(size.X, req.X, ctx.UIScale())
 		maxScroll := req.X - size.X
 		pos := float32(0)
 		if maxScroll > 0 {
 			pos = (item.Scroll.X / maxScroll) * (size.X - barW)
 		}
-		sbW := currentStyle.BorderPad.Slider * 2
+		sbW := ctx.currentStyle.BorderPad.Slider * 2
 		r := rect{
 			X0: item.DrawRect.X0 + pos,
 			Y0: item.DrawRect.Y1 - sbW,
@@ -1060,7 +1055,9 @@ func (win *windowData) SetTitleSize(size float32) {
 	win.TitleHeight = size / win.scale()
 }
 
-func SetUIScale(scale float32) {
+func (ctx *Context) SetUIScale(scale float32) {
+	ctx.mustAlive()
+
 	// Clamp to a sane, supported range so very small or large values don't
 	// break hit testing or rendering. The effective limit is higher than the
 	// user preference limit so a 4x preference can still work on a 2x Retina
@@ -1070,11 +1067,11 @@ func SetUIScale(scale float32) {
 	} else if scale > 8.0 {
 		scale = 8.0
 	}
-	if uiScale == scale {
+	if ctx.uiScale == scale {
 		return
 	}
-	uiScale = scale
-	for _, win := range windows {
+	ctx.uiScale = scale
+	for _, win := range ctx.windows {
 		if win.AutoSize {
 			win.updateAutoSize()
 		} else {
@@ -1085,38 +1082,48 @@ func SetUIScale(scale float32) {
 		}
 		win.clampToScreen()
 	}
-	updateAllTooltipBounds()
-	markAllDirty()
+	ctx.updateAllTooltipBounds()
+	ctx.markAllDirty()
 }
 
 // SetUserUIScale sets the user's preferred UI scale. The effective scale also
 // includes the active display's device scale factor, keeping controls and text
 // physically readable on Retina and other HiDPI displays.
-func SetUserUIScale(scale float32) {
+func (ctx *Context) SetUserUIScale(scale float32) {
+	ctx.mustAlive()
+
 	if scale < 0.5 {
 		scale = 0.5
 	} else if scale > 4.0 {
 		scale = 4.0
 	}
-	userUIScale = scale
+	ctx.userUIScale = scale
 	deviceScale := float32(1)
-	if AutoHiDPI {
-		deviceScale = float32(lastDeviceScale)
+	if ctx.AutoHiDPI {
+		deviceScale = float32(ctx.lastDeviceScale)
 	}
-	SetUIScale(userUIScale * deviceScale)
+	ctx.SetUIScale(ctx.userUIScale * deviceScale)
 }
 
 // UserUIScale reports the cross-display UI preference before automatic HiDPI
 // scaling is applied.
-func UserUIScale() float32 { return userUIScale }
+func (ctx *Context) UserUIScale() float32 {
+	ctx.mustAlive()
+	return ctx.userUIScale
+}
 
-func UIScale() float32 { return uiScale }
+func (ctx *Context) UIScale() float32 {
+	ctx.mustAlive()
+	return ctx.uiScale
+}
 
 func (win *windowData) scale() float32 {
+	ctx := win.ui()
+
 	if win.NoScale {
 		return 1
 	}
-	return uiScale
+	return ctx.uiScale
 }
 
 func (win *windowData) GetRawTitleSize() float32 { return win.TitleHeight }
@@ -1173,13 +1180,15 @@ func (win *windowData) GetRawSize() Point { return win.Size }
 
 func (win *windowData) GetRawPos() Point { return win.Position }
 
-func (item *itemData) GetSize() Point {
+func (item *itemData) intrinsicSize() Point {
+	ctx := item.ui()
+
 	if item.Invisible {
 		return Point{}
 	}
 	item.layoutWrappedLabel()
 	// Start with the explicitly set size (scaled to pixels).
-	sz := Point{X: item.Size.X * uiScale, Y: item.Size.Y * uiScale}
+	sz := Point{X: item.Size.X * ctx.uiScale, Y: item.Size.Y * ctx.uiScale}
 
 	// Auto-size when a dimension is missing or zero.
 	if sz.X <= 0 || sz.Y <= 0 {
@@ -1206,8 +1215,8 @@ func (item *itemData) GetSize() Point {
 					effFont = 12
 				}
 			}
-			textSize := (effFont * uiScale) + 2
-			face := textFace(textSize)
+			textSize := (effFont * ctx.uiScale) + 2
+			face := ctx.textFace(textSize)
 			metrics := item.textContentSize(face)
 			if sz.X <= 0 {
 				if metrics.width <= 0 {
@@ -1233,7 +1242,7 @@ func (item *itemData) GetSize() Point {
 		}
 
 		// 4) Fall back to theme defaults for remaining unspecified dimensions.
-		if (sz.X <= 0 || sz.Y <= 0) && currentTheme != nil {
+		if (sz.X <= 0 || sz.Y <= 0) && ctx.currentTheme != nil {
 			if st := item.themeStyle(); st != nil {
 				def := st.GetSize()
 				if sz.X <= 0 {
@@ -1253,8 +1262,13 @@ func (item *itemData) GetSize() Point {
 		}
 	}
 
+	if item.ItemType == ITEM_FLOW && !item.Fixed && !item.ConstrainToSize {
+		content := item.contentBounds()
+		sz.X, sz.Y = max(sz.X, content.X), max(sz.Y, content.Y)
+	}
+
 	if item.Size.X <= 0 && item.ItemType == ITEM_TEXT && item.Tooltip != "" && item.ParentWindow != nil && item.ParentWindow.ShowTooltipIndicators {
-		sz.X += 18 * uiScale
+		sz.X += 18 * ctx.uiScale
 	}
 
 	// Text commonly changes after a window has been created (validation and
@@ -1270,10 +1284,10 @@ func (item *itemData) GetSize() Point {
 				effFont = 12
 			}
 		}
-		textSize := effFont*uiScale + 2
-		face := itemFace(item, textSize)
+		textSize := effFont*ctx.uiScale + 2
+		face := ctx.itemFace(item, textSize)
 		var metrics textContentMetrics
-		if defaultFace := textFace(textSize); face == defaultFace {
+		if defaultFace := ctx.textFace(textSize); face == defaultFace {
 			metrics = item.textContentSize(defaultFace)
 		} else {
 			metrics = measureTextContent(item.Text, face)
@@ -1287,14 +1301,16 @@ func (item *itemData) GetSize() Point {
 
 	// Account for label text below an item if set.
 	if item.Label != "" {
-		textSize := (item.FontSize * uiScale) + 2
-		sz.Y += textSize + currentStyle.TextPadding*uiScale
+		textSize := (item.FontSize * ctx.uiScale) + 2
+		sz.Y += textSize + ctx.currentStyle.TextPadding*ctx.uiScale
 	}
 	return sz
 }
 
 func (item *itemData) GetPos() Point {
-	return Point{X: item.Position.X * uiScale, Y: item.Position.Y * uiScale}
+	ctx := item.ui()
+
+	return Point{X: item.Position.X * ctx.uiScale, Y: item.Position.Y * ctx.uiScale}
 }
 
 func (item *itemData) GetTextPtr() *string {
@@ -1302,7 +1318,7 @@ func (item *itemData) GetTextPtr() *string {
 }
 
 func itemAcceptsTextEditing(item *itemData) bool {
-	return item != nil && !item.Disabled && (item.ItemType == ITEM_INPUT || (item.ItemType == ITEM_TEXT && item.EditableText))
+	return item != nil && !item.isDisabled() && (item.ItemType == ITEM_INPUT || (item.ItemType == ITEM_TEXT && item.EditableText))
 }
 
 func itemHandlesTextEditing(item *itemData) bool {
@@ -1317,12 +1333,23 @@ const (
 
 // SetTooltip assigns compact, wrapped tooltip text and caches its measured size.
 func (item *itemData) SetTooltip(tip string) {
-	item.tooltipRaw = truncateTooltip(tip)
+	if item == nil {
+		return
+	}
+	raw := truncateTooltip(tip)
+	if item.tooltipRaw == raw {
+		return
+	}
+	had := item.Tooltip != ""
+	item.tooltipRaw = raw
 	item.updateTooltipBounds()
+	layout := item.ParentWindow != nil && item.ParentWindow.ShowTooltipIndicators && had != (item.Tooltip != "")
+	item.runtimeChanged(layout)
 }
 
-// updateTooltipBounds recalculates the cached tooltip size.
 func (item *itemData) updateTooltipBounds() {
+	ctx := item.ui()
+
 	if item == nil {
 		return
 	}
@@ -1331,26 +1358,26 @@ func (item *itemData) updateTooltipBounds() {
 		item.tooltipW, item.tooltipH = 0, 0
 		return
 	}
-	faceSize := float32(12) * uiScale
-	face := textFace(faceSize)
-	item.Tooltip = wrapTooltip(item.tooltipRaw, face, tooltipWrapWidth())
-	w, h := text.Measure(item.Tooltip, face, tooltipLineSpacing(face))
+	faceSize := float32(12) * ctx.uiScale
+	face := ctx.textFace(faceSize)
+	item.Tooltip = wrapTooltip(item.tooltipRaw, face, ctx.tooltipWrapWidth())
+	w, h := text.Measure(item.Tooltip, face, ctx.tooltipLineSpacing(face))
 	item.tooltipW = float32(w)
 	item.tooltipH = float32(h)
 }
 
-func tooltipWrapWidth() float64 {
-	maxWidth := tooltipMaxWidth * float64(uiScale)
-	available := float64(screenWidth) - 2*tooltipPadding*float64(uiScale)
+func (ctx *Context) tooltipWrapWidth() float64 {
+	maxWidth := tooltipMaxWidth * float64(ctx.uiScale)
+	available := float64(ctx.screenWidth) - 2*tooltipPadding*float64(ctx.uiScale)
 	if available < maxWidth {
-		return math.Max(float64(uiScale), available)
+		return math.Max(float64(ctx.uiScale), available)
 	}
 	return maxWidth
 }
 
-func tooltipLineSpacing(face text.Face) float64 {
+func (ctx *Context) tooltipLineSpacing(face text.Face) float64 {
 	metrics := face.Metrics()
-	return math.Ceil(metrics.HAscent + metrics.HDescent + 2*float64(uiScale))
+	return math.Ceil(metrics.HAscent + metrics.HDescent + 2*float64(ctx.uiScale))
 }
 
 func truncateTooltip(tip string) string {
@@ -1416,13 +1443,15 @@ func tooltipWordChunk(word string, face text.Face, maxWidth float64) (chunk, res
 }
 
 func (win *windowData) markDirty() {
+	ctx := win.ui()
+
 	if win == nil {
 		return
 	}
 	if win.repaintRequested.IsZero() {
-		win.repaintRequested = time.Now()
+		win.repaintRequested = ctx.uiNow()
 	}
-	if win.refreshInterval > 0 && win.Render != nil && !win.lastRefresh.IsZero() && time.Since(win.lastRefresh) < win.refreshInterval {
+	if win.refreshInterval > 0 && win.Render != nil && !win.lastRefresh.IsZero() && ctx.uiNow().Sub(win.lastRefresh) < win.refreshInterval {
 		win.refreshPending = true
 		return
 	}
@@ -1430,8 +1459,10 @@ func (win *windowData) markDirty() {
 }
 
 func (item *itemData) markDirty() {
-	if item != nil && item.ItemType != ITEM_FLOW {
-		item.Dirty = true
+	if item != nil {
+		if item.ItemType != ITEM_FLOW {
+			item.Dirty = true
+		}
 		if item.ParentWindow != nil {
 			item.ParentWindow.markDirty()
 			if item.ParentWindow.repaintReason == "" {
@@ -1454,39 +1485,37 @@ func (item *itemData) UpdateImage(img *ebiten.Image) {
 			item.Size = point{X: float32(w), Y: float32(h)}
 		}
 	}
-	item.markDirty()
+	item.runtimeChanged(true)
 }
 
 func (item *itemData) setParentWindow(win *windowData) {
 	item.ParentWindow = win
 	for _, child := range item.Contents {
-		child.setParentWindow(win)
+		if child != nil {
+			child.Parent = item
+			child.setParentWindow(win)
+		}
 	}
 	for _, tab := range item.Tabs {
-		tab.setParentWindow(win)
+		if tab != nil {
+			tab.Parent = item
+			tab.setParentWindow(win)
+		}
 	}
+	item.normalizeTabs()
 }
 
 // itemsHaveIndeterminate reports whether any of the provided items or their
 // children contain an indeterminate progress bar.
 func itemsHaveIndeterminate(items []*itemData) bool {
 	for _, it := range items {
+		if it == nil || it.Invisible {
+			continue
+		}
 		if it.ItemType == ITEM_PROGRESS && it.Indeterminate {
 			return true
 		}
-		if len(it.Tabs) > 0 {
-			if it.ActiveTab >= len(it.Tabs) {
-				if len(it.Tabs) > 0 {
-					it.ActiveTab = 0
-				}
-			}
-			if it.ActiveTab >= 0 && it.ActiveTab < len(it.Tabs) {
-				if itemsHaveIndeterminate(it.Tabs[it.ActiveTab].Contents) {
-					return true
-				}
-			}
-		}
-		if itemsHaveIndeterminate(it.Contents) {
+		if itemsHaveIndeterminate(it.activeContents()) {
 			return true
 		}
 	}
@@ -1529,16 +1558,16 @@ func updateItemTooltipTree(it *itemData) {
 	}
 }
 
-func updateAllTooltipBounds() {
-	for _, win := range windows {
+func (ctx *Context) updateAllTooltipBounds() {
+	for _, win := range ctx.windows {
 		for _, it := range win.Contents {
 			updateItemTooltipTree(it)
 		}
 	}
 }
 
-func markAllDirty() {
-	for _, win := range windows {
+func (ctx *Context) markAllDirty() {
+	for _, win := range ctx.windows {
 		win.markDirty()
 		for _, it := range win.Contents {
 			markItemTreeDirty(it)
@@ -1547,72 +1576,17 @@ func markAllDirty() {
 }
 
 func (item *itemData) bounds(offset point) rect {
-	if item.Invisible {
+	if item == nil || item.Invisible {
 		return rect{}
 	}
-	var r rect
-	if item.ItemType == ITEM_FLOW && !item.Fixed {
-		// Unfixed flows should report bounds based solely on their content
-		r = rect{X0: offset.X, Y0: offset.Y, X1: offset.X, Y1: offset.Y}
-	} else {
-		size := item.GetSize()
-		r = rect{
-			X0: offset.X,
-			Y0: offset.Y,
-			X1: offset.X + size.X,
-			Y1: offset.Y + size.Y,
-		}
-	}
+	size := item.GetSize()
+	r := rect{X0: offset.X, Y0: offset.Y, X1: offset.X + size.X, Y1: offset.Y + size.Y}
 	if item.ItemType == ITEM_FLOW {
-		// For fixed flows, the bounds should be limited to the flow's
-		// own rectangle so autosize and hit-testing don't expand to the
-		// content beyond the fixed size. The content is visible via
-		// scrolling/clipping as needed.
-		if item.Fixed {
-			return r
-		}
-		var flowOffset point
-		var subItems []*itemData
-		tabHeight := float32(0)
-		if len(item.Tabs) > 0 {
-			if item.ActiveTab >= len(item.Tabs) {
-				item.ActiveTab = 0
-			}
-			subItems = item.Tabs[item.ActiveTab].Contents
-			tabSize := measureTabLayout(item, item.themeStyle(), nil)
-			tabHeight = tabSize.Y
-			r.Y1 = offset.Y + tabHeight
-			r.X1 = offset.X + tabSize.X
-		} else {
-			subItems = item.Contents
-		}
-		for _, sub := range subItems {
-			if sub.Invisible {
-				continue
-			}
-			var off point
-			if item.FlowType == FLOW_HORIZONTAL {
-				off = pointAdd(offset, point{X: flowOffset.X + sub.getPosition(item.ParentWindow).X, Y: tabHeight + sub.getPosition(item.ParentWindow).Y})
-			} else if item.FlowType == FLOW_VERTICAL {
-				off = pointAdd(offset, point{X: sub.getPosition(item.ParentWindow).X, Y: tabHeight + flowOffset.Y + sub.getPosition(item.ParentWindow).Y})
-			} else {
-				off = pointAdd(offset, pointAdd(point{X: flowOffset.X, Y: tabHeight + flowOffset.Y}, sub.getPosition(item.ParentWindow)))
-			}
-			sr := sub.bounds(off)
-			r = unionRect(r, sr)
-			if item.FlowType == FLOW_HORIZONTAL {
-				flowOffset.X += sub.GetSize().X + sub.getPosition(item.ParentWindow).X
-			} else if item.FlowType == FLOW_VERTICAL {
-				flowOffset.Y += sub.GetSize().Y + sub.getPosition(item.ParentWindow).Y
-			}
-		}
-	} else {
-		for _, sub := range item.Contents {
-			if sub.Invisible {
-				continue
-			}
-			off := pointAdd(offset, sub.getPosition(item.ParentWindow))
-			r = unionRect(r, sub.bounds(off))
+		return r
+	}
+	for _, sub := range item.Contents {
+		if sub != nil && !sub.Invisible {
+			r = unionRect(r, sub.bounds(pointAdd(offset, sub.getPosition(item.ParentWindow))))
 		}
 	}
 	return r
@@ -1650,6 +1624,8 @@ func (win *windowData) contentBounds() point {
 }
 
 func (win *windowData) updateAutoSize() {
+	ctx := win.ui()
+
 	// Resolve nested flows before measuring them. In particular, a UI-scale
 	// change can leave a flow with its previous dimensions until it is laid out
 	// again; measuring that stale size made an auto-sized window one layout pass
@@ -1668,11 +1644,11 @@ func (win *windowData) updateAutoSize() {
 	// Round outward to whole pixels so fractional UI scales cannot leave the
 	// viewport slightly smaller than its content after converting to UI units.
 	size.Y = float32(math.Ceil(float64(req.Y + win.GetTitleSize() + 2*pad)))
-	if size.X > float32(screenWidth) {
-		size.X = float32(screenWidth)
+	if size.X > float32(ctx.screenWidth) {
+		size.X = float32(ctx.screenWidth)
 	}
-	if size.Y > float32(screenHeight) {
-		size.Y = float32(screenHeight)
+	if size.Y > float32(ctx.screenHeight) {
+		size.Y = float32(ctx.screenHeight)
 	}
 	s := win.scale()
 	win.Size = point{X: size.X / s, Y: size.Y / s}
@@ -1683,7 +1659,7 @@ func (win *windowData) updateAutoSize() {
 	// scroll range after increasing UI scale.
 	resolved := win.contentBounds()
 	resolvedY := float32(math.Ceil(float64(resolved.Y + win.GetTitleSize() + 2*pad)))
-	if resolvedY > size.Y && resolvedY <= float32(screenHeight) {
+	if resolvedY > size.Y && resolvedY <= float32(ctx.screenHeight) {
 		win.Size.Y = resolvedY / s
 		win.resizeFlows()
 	}
@@ -1691,160 +1667,49 @@ func (win *windowData) updateAutoSize() {
 }
 
 func (item *itemData) contentBounds() point {
-	if item.Invisible {
+	ctx := item.ui()
+
+	if item == nil || item.Invisible {
 		return point{}
 	}
-	list := item.Contents
-	tabHeight := float32(0)
-	if len(item.Tabs) > 0 {
-		if item.ActiveTab >= len(item.Tabs) {
-			item.ActiveTab = 0
-		}
-		list = item.Tabs[item.ActiveTab].Contents
-		tabHeight = tabStripHeight(item, item.themeStyle())
+	size := point{X: item.Size.X * ctx.uiScale, Y: item.Size.Y * ctx.uiScale}
+	if item.hasResolvedLayout() {
+		size = item.layoutSize
 	}
-	if len(list) == 0 {
-		return point{X: tabStripWidth(item), Y: tabHeight}
+	padding := item.contentInsets()
+	result := point{X: max(ctx.tabStripWidth(item), padding.Left+padding.Right), Y: ctx.tabStripHeight(item, item.themeStyle()) + padding.Top + padding.Bottom}
+	for child, pos := range item.layoutChildren(size) {
+		r := child.bounds(pos)
+		result.X = max(result.X, r.X1+padding.Right)
+		result.Y = max(result.Y, r.Y1+padding.Bottom)
 	}
-
-	base := point{}
-	first := true
-	var b rect
-	var flowOffset point
-
-	for _, sub := range list {
-		if sub == nil || sub.Invisible {
-			continue
-		}
-		off := pointAdd(base, sub.getPosition(item.ParentWindow))
-		if item.ItemType == ITEM_FLOW {
-			if item.FlowType == FLOW_HORIZONTAL {
-				off = pointAdd(base, point{X: flowOffset.X + sub.getPosition(item.ParentWindow).X, Y: sub.getPosition(item.ParentWindow).Y})
-			} else if item.FlowType == FLOW_VERTICAL {
-				off = pointAdd(base, point{X: sub.getPosition(item.ParentWindow).X, Y: flowOffset.Y + sub.getPosition(item.ParentWindow).Y})
-			} else {
-				off = pointAdd(base, pointAdd(flowOffset, sub.getPosition(item.ParentWindow)))
-			}
-		}
-
-		r := sub.bounds(off)
-		if first {
-			b = r
-			first = false
-		} else {
-			b = unionRect(b, r)
-		}
-
-		if item.ItemType == ITEM_FLOW {
-			if item.FlowType == FLOW_HORIZONTAL {
-				flowOffset.X += sub.GetSize().X + sub.getPosition(item.ParentWindow).X
-			} else if item.FlowType == FLOW_VERTICAL {
-				flowOffset.Y += sub.GetSize().Y + sub.getPosition(item.ParentWindow).Y
-			}
-		}
-	}
-
-	if first {
-		return point{X: tabStripWidth(item), Y: tabHeight}
-	}
-	return point{X: max(b.X1-base.X, tabStripWidth(item)), Y: b.Y1 - base.Y + tabHeight}
+	return result
 }
 
 func (item *itemData) resizeFlow(parentSize point) {
-	if item.Invisible {
-		item.clearHiddenState()
-		return
-	}
-	available := parentSize
-
-	if item.ItemType == ITEM_FLOW {
-		size := available
-		if item.Fixed {
-			size = item.GetSize()
-			// If a fixed flow has unspecified dimensions, expand missing ones to content bounds.
-			if size.X <= 1 || size.Y <= 1 {
-				cb := item.contentBounds()
-				if size.X <= 1 {
-					size.X = cb.X
-				}
-				if size.Y <= 1 {
-					size.Y = cb.Y
-				}
-			}
-		} else if !item.Scrollable {
-			// Unfixed, non-scrollable flows should size to their content
-			size = item.contentBounds()
-		}
-
-		if !item.Scrollable && !item.ConstrainToSize {
-			// Ensure the flow is large enough to contain its children
-			req := item.contentBounds()
-			if req.X > size.X {
-				size.X = req.X
-			}
-			if req.Y > size.Y {
-				size.Y = req.Y
-			}
-		}
-
-		item.Size = point{X: size.X / uiScale, Y: size.Y / uiScale}
-		available = item.GetSize()
-	} else {
-		available = item.GetSize()
-	}
-
-	var list []*itemData
-	if len(item.Tabs) > 0 {
-		if item.ActiveTab >= len(item.Tabs) {
-			item.ActiveTab = 0
-		}
-		list = item.Tabs[item.ActiveTab].Contents
-	} else {
-		list = item.Contents
-	}
-	for _, sub := range list {
-		if sub == nil {
-			continue
-		}
-		sub.resizeFlow(available)
-	}
-
-	if item.ItemType == ITEM_FLOW {
-		req := item.contentBounds()
-		// Descendants may have resized during this pass. Propagate their
-		// final bounds back up before siblings are placed or clipped.
-		if !item.Scrollable && !item.ConstrainToSize {
-			if item.Fixed {
-				item.Size.X = max(item.Size.X, req.X/uiScale)
-				item.Size.Y = max(item.Size.Y, req.Y/uiScale)
-			} else {
-				item.Size = point{X: req.X / uiScale, Y: req.Y / uiScale}
-			}
-		}
-		size := item.GetSize()
-		if req.Y <= size.Y {
-			item.Scroll.Y = 0
-		} else {
-			max := req.Y - size.Y
-			if item.Scroll.Y > max {
-				item.Scroll.Y = max
-			}
-		}
-		if req.X <= size.X {
-			item.Scroll.X = 0
-		} else {
-			max := req.X - size.X
-			if item.Scroll.X > max {
-				item.Scroll.X = max
-			}
-		}
-	}
+	item.clearLayout()
+	item.measureLayout()
+	item.resolveLayout(parentSize, point{X: -1, Y: -1})
 }
 
 func (win *windowData) resizeFlows() {
-	for _, item := range win.Contents {
-		item.resizeFlow(win.GetSize())
+	ctx := win.ui()
+	ctx.bindItems(win.Contents)
+
+	pad := (win.Padding + win.BorderPad) * win.scale()
+	available := point{X: max(1, win.GetSize().X-2*pad), Y: max(1, win.GetSize().Y-win.GetTitleSize()-2*pad)}
+	layout := func(space Point) {
+		for _, item := range win.Contents {
+			position := item.getPosition(win)
+			item.resizeFlow(point{X: max(0, space.X-position.X), Y: max(0, space.Y-position.Y)})
+		}
 	}
+	layout(available)
+	if !win.NoScroll && win.contentBounds().Y > available.Y {
+		available.X = max(0, available.X-ctx.currentStyle.BorderPad.Slider*2)
+		layout(available)
+	}
+
 }
 
 func pixelOffset(width float32) float32 {
@@ -1854,19 +1719,19 @@ func pixelOffset(width float32) float32 {
 	return 0.5
 }
 
-func strokeLine(dst *ebiten.Image, x0, y0, x1, y1, width float32, col color.Color, aa bool) {
+func (ctx *Context) strokeLine(dst *ebiten.Image, x0, y0, x1, y1, width float32, col color.Color, aa bool) {
 	width = float32(math.Round(float64(width)))
 	off := pixelOffset(width)
 	x0 = float32(math.Round(float64(x0))) + off
 	y0 = float32(math.Round(float64(y0))) + off
 	x1 = float32(math.Round(float64(x1))) + off
 	y1 = float32(math.Round(float64(y1))) + off
-	if !drawCachedLine(dst, x0, y0, x1, y1, width, col, aa) {
-		strokeLineFn(dst, x0, y0, x1, y1, width, col, aa)
+	if !ctx.drawCachedLine(dst, x0, y0, x1, y1, width, col, aa) {
+		ctx.strokeLineFn(dst, x0, y0, x1, y1, width, col, aa)
 	}
 }
 
-func strokeRect(dst *ebiten.Image, x, y, w, h, width float32, col color.Color, aa bool) {
+func (ctx *Context) strokeRect(dst *ebiten.Image, x, y, w, h, width float32, col color.Color, aa bool) {
 	width = float32(math.Round(float64(width)))
 	off := pixelOffset(width)
 	x = float32(math.Round(float64(x))) + off
@@ -1874,7 +1739,7 @@ func strokeRect(dst *ebiten.Image, x, y, w, h, width float32, col color.Color, a
 	w = float32(math.Round(float64(w)))
 	h = float32(math.Round(float64(h)))
 	if !drawPixelFrame(dst, x, y, w, h, width, col) {
-		strokeRectFn(dst, x, y, w, h, width, col, aa)
+		ctx.strokeRectFn(dst, x, y, w, h, width, col, aa)
 	}
 }
 

@@ -6,46 +6,50 @@ import (
 )
 
 func TestUserUIScaleIncludesDeviceScale(t *testing.T) {
-	originalScale := uiScale
-	originalUserScale := userUIScale
-	originalDeviceScale := lastDeviceScale
+	ctx := newTestContext(t)
+
+	originalScale := ctx.uiScale
+	originalUserScale := ctx.userUIScale
+	originalDeviceScale := ctx.lastDeviceScale
 	t.Cleanup(func() {
-		userUIScale = originalUserScale
-		lastDeviceScale = originalDeviceScale
-		SetUIScale(originalScale)
+		ctx.userUIScale = originalUserScale
+		ctx.lastDeviceScale = originalDeviceScale
+		ctx.SetUIScale(originalScale)
 	})
 
-	lastDeviceScale = 2
-	SetUserUIScale(1)
-	if got := UIScale(); got != 2 {
+	ctx.lastDeviceScale = 2
+	ctx.SetUserUIScale(1)
+	if got := ctx.UIScale(); got != 2 {
 		t.Fatalf("Retina effective UI scale = %v, want 2", got)
 	}
-	if got := UserUIScale(); got != 1 {
+	if got := ctx.UserUIScale(); got != 1 {
 		t.Fatalf("Retina user UI scale = %v, want 1", got)
 	}
 
-	SetUserUIScale(1.25)
-	if got := UIScale(); got != 2.5 {
+	ctx.SetUserUIScale(1.25)
+	if got := ctx.UIScale(); got != 2.5 {
 		t.Fatalf("Retina effective UI scale after user adjustment = %v, want 2.5", got)
 	}
 
-	SetUserUIScale(4)
-	if got := UIScale(); got != 8 {
+	ctx.SetUserUIScale(4)
+	if got := ctx.UIScale(); got != 8 {
 		t.Fatalf("Retina effective UI scale at maximum user preference = %v, want 8", got)
 	}
 }
 
 func TestDeviceScaleCheckIsThrottled(t *testing.T) {
-	originalLastCheck := lastScaleCheck
-	t.Cleanup(func() { lastScaleCheck = originalLastCheck })
+	ctx := newTestContext(t)
+
+	originalLastCheck := ctx.lastScaleCheck
+	t.Cleanup(func() { ctx.lastScaleCheck = originalLastCheck })
 
 	checkedAt := time.Now()
-	lastScaleCheck = checkedAt
+	ctx.lastScaleCheck = checkedAt
 
-	if deviceScaleCheckDue(checkedAt.Add(scaleCheckInterval - time.Nanosecond)) {
+	if ctx.deviceScaleCheckDue(checkedAt.Add(scaleCheckInterval - time.Nanosecond)) {
 		t.Fatal("device scale check became due before the interval elapsed")
 	}
-	if !deviceScaleCheckDue(checkedAt.Add(scaleCheckInterval)) {
+	if !ctx.deviceScaleCheckDue(checkedAt.Add(scaleCheckInterval)) {
 		t.Fatal("device scale check not due after the interval elapsed")
 	}
 }

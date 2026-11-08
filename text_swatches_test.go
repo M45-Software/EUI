@@ -3,7 +3,9 @@ package eui
 import "testing"
 
 func TestTextSwatchesKeepSourceAndRevealForEditing(t *testing.T) {
-	item := editingFixture(t, "é\t\"#11223344\" tail", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "é\t\"#11223344\" tail", true)
 	span := TextColorSpan{Start: 3, End: 12, Color: NewColor(17, 34, 51, 68)}
 	clicks, scans := 0, 0
 	item.SetTextColorSwatches(func(value string) []TextColorSpan {
@@ -54,7 +56,9 @@ func TestTextSwatchesKeepSourceAndRevealForEditing(t *testing.T) {
 }
 
 func TestTextSwatchesIgnoreInvalidRanges(t *testing.T) {
-	item := editingFixture(t, "first\nsecond", true)
+	ctx := newTestContext(t)
+
+	item := ctx.editingFixture(t, "first\nsecond", true)
 	item.SetTextColorSwatches(func(string) []TextColorSpan {
 		return []TextColorSpan{{Start: -1, End: 2}, {Start: 3, End: 9}, {Start: 20, End: 24}, {Start: 6, End: 12}}
 	}, nil)

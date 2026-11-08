@@ -9,19 +9,22 @@ import (
 
 // SetColorSwatch updates a swatch and refreshes its window.
 func SetColorSwatch(item *ItemData, col Color) {
+	if item == nil || item.WheelColor == col && item.Text == "" {
+		return
+	}
+	layout := item.Text != ""
 	item.WheelColor = col
 	item.Text = ""
-	item.Dirty = true
-	if item.ParentWindow != nil {
-		item.ParentWindow.Refresh()
-	}
+	item.runtimeChanged(layout)
 }
 
 // NewColorSwatch creates a button that edits a color on click. A nil choose
 // callback opens an independent EUI picker; applications can supply their own
 // picker lifecycle. apply is called only after confirmation and may be nil.
-func NewColorSwatch(title string, initial Color, choose func(string, Color, func(Color)), apply func(Color)) *ItemData {
-	item, events := NewButton()
+func (ctx *Context) NewColorSwatch(title string, initial Color, choose func(string, Color, func(Color)), apply func(Color)) *ItemData {
+	ctx.mustAlive()
+
+	item, events := ctx.NewButton()
 	item.ColorSwatch = true
 	item.Filled = true
 	item.Size = Point{X: 128, Y: 28}
@@ -33,7 +36,7 @@ func NewColorSwatch(title string, initial Color, choose func(string, Color, func
 			return
 		}
 		if choose == nil {
-			choose = func(title string, initial Color, apply func(Color)) { ShowColorPicker(title, initial, apply) }
+			choose = func(title string, initial Color, apply func(Color)) { ctx.ShowColorPicker(title, initial, apply) }
 		}
 		choose(title, item.WheelColor, func(col Color) {
 			SetColorSwatch(item, col)
@@ -48,8 +51,10 @@ func NewColorSwatch(title string, initial Color, choose func(string, Color, func
 // ShowColorPicker opens an independent HSV/opacity editor. Changes remain local
 // until Apply; closing or cancelling discards them. The window removes itself
 // on close. Initialize the EUI font source before opening a picker.
-func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData {
-	win := NewWindow()
+func (ctx *Context) ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData {
+	ctx.mustAlive()
+
+	win := ctx.NewWindow()
 	win.Title = title
 	win.Closable, win.Movable, win.AutoSize = true, true, true
 	win.Resizable = false
@@ -57,22 +62,22 @@ func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData
 	win.OnClose = func() {
 		win.RemoveWindow()
 	}
-	root := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 480, Y: 1}}
-	columns := NewRow()
-	left := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 200, Y: 1}}
-	right := &ItemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 264, Y: 1}, Position: Point{X: 8}}
+	root := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 480, Y: 1}}
+	columns := ctx.NewRow()
+	left := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 200, Y: 1}}
+	right := &ItemData{ctx: ctx, ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Size: Point{X: 264, Y: 1}, Position: Point{X: 8}}
 	columns.AddItem(left)
 	columns.AddItem(right)
 	root.AddItem(columns)
-	wheel, _ := NewColorWheel()
+	wheel, _ := ctx.NewColorWheel()
 	wheel.Size = Point{X: 192, Y: 192}
 	left.AddItem(wheel)
-	preview, _ := NewButton()
+	preview, _ := ctx.NewButton()
 	preview.ColorSwatch, preview.Filled = true, true
 	preview.Size = Point{X: 192, Y: 28}
 	preview.FontSize = 12
 	left.AddItem(preview)
-	status, _ := NewText()
+	status, _ := ctx.NewText()
 	status.FontSize = 11
 	status.Size = Point{X: 480, Y: 20}
 	root.AddItem(status)
@@ -81,32 +86,30 @@ func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData
 	pending := initial
 	var sliders, inputs [4]*ItemData
 	var syncControls func(bool)
-	applyButton, applyEvents := NewButton()
+	applyButton, applyEvents := ctx.NewButton()
 	applyButton.Text = "Apply"
 	applyButton.Size = Point{X: 112, Y: 32}
 	valid := [4]bool{true, true, true, true}
 	refreshValidity := func(message string) {
-		applyButton.Disabled = false
+		disabled := false
 		for _, ok := range valid {
-			if !ok {
-				applyButton.Disabled = true
-			}
+			disabled = disabled || !ok
 		}
-		status.Text = message
+		applyButton.SetDisabled(disabled)
+		status.UpdateText(message)
 		if applyButton.Disabled && message == "" {
-			status.Text = "Correct the invalid value before applying."
+			status.UpdateText("Correct the invalid value before applying.")
 		}
-		win.Refresh()
 	}
 	for i, label := range []string{"Hue (°)", "Saturation (%)", "Brightness (%)", "Opacity (%)"} {
 		i := i
-		caption, _ := NewText()
+		caption, _ := ctx.NewText()
 		caption.Text = label
 		caption.FontSize = 12
 		caption.Size = Point{X: 264, Y: 20}
 		right.AddItem(caption)
-		row := NewRow()
-		slider, events := NewSlider()
+		row := ctx.NewRow()
+		slider, events := ctx.NewSlider()
 		sliders[i] = slider
 		slider.HideValue = true
 		slider.MinValue = 0
@@ -115,7 +118,7 @@ func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData
 			slider.MaxValue = 360
 		}
 		slider.Size = Point{X: 176, Y: 28}
-		input, inputEvents := NewInput()
+		input, inputEvents := ctx.NewInput()
 		inputs[i] = input
 		input.Size = Point{X: 72, Y: 28}
 		input.FontSize = 12
@@ -147,21 +150,20 @@ func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData
 	}
 	syncControls = func(updateInputs bool) {
 		pending = NewColorHSV(values[0], values[1]/100, values[2]/100, values[3]/100)
-		wheel.WheelColor = pending
-		wheel.Dirty = true
+		wheel.SetWheelColor(pending)
 		SetColorSwatch(preview, pending)
 		for i := range sliders {
-			sliders[i].Value = float32(values[i])
+			sliders[i].SetValue(float32(values[i]))
 			if updateInputs {
-				inputs[i].Text = strconv.FormatFloat(values[i], 'f', 1, 64)
+				inputs[i].UpdateText(strconv.FormatFloat(values[i], 'f', 1, 64))
 				valid[i] = true
 			}
 		}
 		refreshValidity("")
 	}
 	wheel.OnColorChange = func(col Color) { h, _, v, _ := col.HSVA(); values[0], values[2] = h, v*100; syncControls(true) }
-	footer := NewRow()
-	cancel, cancelEvents := NewButton()
+	footer := ctx.NewRow()
+	cancel, cancelEvents := ctx.NewButton()
 	cancel.Text = "Cancel"
 	cancel.Size = Point{X: 112, Y: 32}
 	cancelEvents.Handle = func(ev UIEvent) {
@@ -184,7 +186,7 @@ func ShowColorPicker(title string, initial Color, apply func(Color)) *WindowData
 	// Opening a picker and immediately applying should preserve the exact color.
 	pending = initial
 	SetColorSwatch(preview, initial)
-	wheel.WheelColor = initial
+	wheel.SetWheelColor(initial)
 	win.AddItem(root)
 	win.AddWindow(false)
 	win.MarkOpen()

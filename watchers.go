@@ -7,80 +7,68 @@ import (
 	"time"
 )
 
-var (
-	themeModTime   time.Time
-	styleModTime   time.Time
-	modCheckTime   time.Time
-	themePath      string
-	stylePath      string
-	themeDirectory = "themes"
-	// AutoReload enables automatic reloading of theme and style files
-	// when they are modified on disk, only use this for quickly iterating when designing your own themes.
-	AutoReload bool
-)
-
-func init() {
-	modCheckTime = time.Now()
-	updateThemePath()
-	updateStylePath()
-	refreshThemeMod()
-	refreshStyleMod()
+func (ctx *Context) initializeWatchers() {
+	ctx.modCheckTime = time.Now()
+	ctx.updateThemePath()
+	ctx.updateStylePath()
+	ctx.refreshThemeMod()
+	ctx.refreshStyleMod()
 }
 
-func updateThemePath() {
-	themePath = filepath.Join(themeDirectory, "palettes", currentThemeName+".json")
+func (ctx *Context) updateThemePath() {
+	ctx.themePath = filepath.Join(ctx.themeDirectory, "palettes", ctx.currentThemeName+".json")
 }
 
-func refreshThemeMod() {
-	if info, err := os.Stat(themePath); err == nil {
-		themeModTime = info.ModTime()
+func (ctx *Context) refreshThemeMod() {
+	if info, err := os.Stat(ctx.themePath); err == nil {
+		ctx.themeModTime = info.ModTime()
 	} else {
-		themeModTime = time.Time{}
+		ctx.themeModTime = time.Time{}
 	}
 }
 
-func updateStylePath() {
-	stylePath = filepath.Join(themeDirectory, "styles", currentStyleName+".json")
+func (ctx *Context) updateStylePath() {
+	ctx.stylePath = filepath.Join(ctx.themeDirectory, "styles", ctx.currentStyleName+".json")
 }
 
-func refreshStyleMod() {
-	if info, err := os.Stat(stylePath); err == nil {
-		styleModTime = info.ModTime()
+func (ctx *Context) refreshStyleMod() {
+	if info, err := os.Stat(ctx.stylePath); err == nil {
+		ctx.styleModTime = info.ModTime()
 	} else {
-		styleModTime = time.Time{}
+		ctx.styleModTime = time.Time{}
 	}
 }
 
-func checkThemeStyleMods() {
-	if !AutoReload {
+func (ctx *Context) checkThemeStyleMods() {
+	if !ctx.AutoReload {
 		return
 	}
-	if time.Since(modCheckTime) < 500*time.Millisecond {
+	if time.Since(ctx.modCheckTime) < 500*time.Millisecond {
 		return
 	}
-	modCheckTime = time.Now()
-	if info, err := os.Stat(themePath); err == nil {
-		if info.ModTime().After(themeModTime) {
+	ctx.modCheckTime = time.Now()
+	if info, err := os.Stat(ctx.themePath); err == nil {
+		if info.ModTime().After(ctx.themeModTime) {
 			log.Println("Palette reload")
-			if err := LoadTheme(currentThemeName); err != nil {
+			if err := ctx.LoadTheme(ctx.currentThemeName); err != nil {
 				log.Printf("Auto reload theme error: %v", err)
 			}
-			themeModTime = info.ModTime()
+			ctx.themeModTime = info.ModTime()
 		}
 	} else {
-		log.Println("Unable to stat " + currentThemeName + ": " + err.Error())
+		log.Println("Unable to stat " + ctx.currentThemeName + ": " + err.Error())
 	}
 
-	if info, err := os.Stat(stylePath); err == nil {
-		if info.ModTime().After(styleModTime) {
+	if info, err := os.Stat(ctx.stylePath); err == nil {
+		if info.ModTime().After(ctx.styleModTime) {
 			log.Println("Style theme reload")
-			if err := LoadStyle(currentStyleName); err != nil {
+			if err := ctx.LoadStyle(ctx.currentStyleName); err != nil {
 				log.Printf("Auto reload style error: %v", err)
 			}
-			styleModTime = info.ModTime()
+			ctx.styleModTime = info.ModTime()
 		}
 	} else {
-		log.Println("Unable to stat " + currentStyleName + ": " + err.Error())
+		log.Println("Unable to stat " + ctx.currentStyleName + ": " + err.Error())
 	}
 
 }

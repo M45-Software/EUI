@@ -1,183 +1,160 @@
 package eui
 
 import (
-	"context"
 	"math"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/Distortions81/EUI/internal/inputkeys"
-
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
-	clipboard "golang.design/x/clipboard"
-)
-
-var (
-	mposOld     point
-	cursorShape ebiten.CursorShapeType
-
-	dragPart   dragType
-	dragWin    *windowData
-	dragFlow   *itemData
-	activeItem *itemData
-
-	downWin             *windowData
-	pointerPressHandled bool
-
-	activeSearch     *windowData
-	selectedTextItem *itemData
-	updateNow        time.Time
-
-	inputBuf []rune
-	// inputWindowOrder is reused each frame to mirror the workspace draw
-	// layers without allocating.
-	inputWindowOrder []*windowData
-
-	keyboardInputCaptured bool
-)
-
-var (
-	ShiftPressed          bool
-	CtrlPressed           bool
-	CapsLockToggleHandler func()
 )
 
 // Update processes input and updates window state.
 // Programs embedding the UI can call this from their Ebiten Update handler.
-func Update() error {
-	updateNow = time.Now()
-	for _, it := range []*itemData{focusedItem, activeItem, hoveredItem, dragFlow} {
+func (ctx *Context) Update() (err error) {
+	if ctx == nil || ctx.disposed {
+		return ErrContextDisposed
+	}
+	ctx.mustAlive()
+	for _, win := range ctx.windows {
+		if win != nil {
+			ctx.requireWindow(win)
+			ctx.requireItem(win.DefaultButton)
+		}
+	}
+
+	if ctx.updateDepth > 0 || ctx.drawDepth > 0 {
+		return ErrContextReentry
+	}
+	ctx.updateDepth++
+	defer func() {
+		ctx.updateDepth--
+		if ctx.disposePending {
+			ctx.disposeNow()
+			if err == nil {
+				err = ErrContextDisposed
+			}
+		}
+	}()
+
+	if err := ctx.sampleInput(); err != nil {
+		return err
+	}
+	ctx.updateNow = ctx.sampledInput.now
+	for _, it := range []*itemData{ctx.focusedItem, ctx.activeItem, ctx.hoveredItem, ctx.dragFlow} {
 		if it != nil && (it.isInvisible() || it.ParentWindow != nil && !it.ParentWindow.Open) {
 			it.clearHiddenState()
 		}
 	}
-	checkThemeStyleMods()
-	pointerPressHandled = false
+	ctx.checkThemeStyleMods()
+	ctx.pointerPressHandled = false
 
-	shiftPressed := ebiten.IsKeyPressed(ebiten.KeyShift) || ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
-	ShiftPressed = shiftPressed
-	ctrlPressed := ebiten.IsKeyPressed(ebiten.KeyControl) || ebiten.IsKeyPressed(ebiten.KeyControlLeft) || ebiten.IsKeyPressed(ebiten.KeyControlRight)
-	CtrlPressed = ctrlPressed
-	altPressed := ebiten.IsKeyPressed(ebiten.KeyAlt) || ebiten.IsKeyPressed(ebiten.KeyAltLeft) || ebiten.IsKeyPressed(ebiten.KeyAltRight)
-	if !keyboardInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyCapsLock) {
-		if CapsLockToggleHandler != nil {
-			CapsLockToggleHandler()
-		}
-	}
-	_ = altPressed
-	mods := inputkeys.Current()
-	if activeSearch != nil && !activeSearch.Open {
-		activeSearch = nil
-	}
-	if !keyboardInputCaptured && activeWindow != nil && activeWindow.Open {
-		if mods.Shortcut() && inpututil.IsKeyJustPressed(ebiten.KeyF) {
-			activeWindow.OpenSearch()
-		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyF3) && activeWindow.OnSearchNext != nil {
-			activeWindow.OnSearchNext(shiftPressed)
-		}
+	shiftPressed := ctx.keyPressed(ebiten.KeyShift)
+	ctx.ShiftPressed = shiftPressed
+	ctrlPressed := ctx.keyPressed(ebiten.KeyControl)
+	ctx.CtrlPressed = ctrlPressed
+	mods := ctx.inputModifiers()
+	if ctx.activeSearch != nil && !ctx.activeSearch.Open {
+		ctx.activeSearch = nil
 	}
 
-	if !keyboardInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyGraveAccent) && shiftPressed {
-		_ = DumpTree()
-	}
+	prevHovered := ctx.hoveredItem
+	ctx.hoveredItem = nil
 
-	prevHovered := hoveredItem
-	hoveredItem = nil
-
-	mx, my := PointerPosition()
+	mx, my := ctx.sampledInput.x, ctx.sampledInput.y
 	mpos := point{X: float32(mx), Y: float32(my)}
-	dismissContextMenusOutside(mpos)
+	if mpos != ctx.mposOld {
+		for _, menu := range ctx.contextMenus {
+			menu.keyboardMenu = false
+		}
+	}
+	ctx.dismissContextMenusOutside(mpos)
 	if prevHovered != nil && prevHovered.ItemType == ITEM_DROPDOWN {
-		r, _ := dropdownOpenRect(prevHovered, point{X: prevHovered.DrawRect.X0, Y: prevHovered.DrawRect.Y0})
-		if !prevHovered.Open || !r.containsPoint(mpos) {
+		r, _ := ctx.dropdownOpenRect(prevHovered, point{X: prevHovered.DrawRect.X0, Y: prevHovered.DrawRect.Y0})
+		if !prevHovered.keyboardMenu && (!prevHovered.Open || !r.containsPoint(mpos)) {
 			prevHovered.clearDropdownHover()
 		}
 	}
-	if !keyboardInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		closeAllDropdowns()
-	}
-	orderedWindows := windowsFrontToBack()
-	updateCloseHover(orderedWindows, mpos)
+	orderedWindows := ctx.windowsFrontToBack()
+	ctx.updateCloseHover(orderedWindows, mpos)
 
-	click := pointerJustPressed()
-	midClick := middleClickMove && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonMiddle)
-	if click || midClick {
-		downWin = windowAtPointer(orderedWindows, mpos)
+	click := ctx.pointerJustPressed()
+	midClick := ctx.middleClickMove && ctx.mouseJustPressed(ebiten.MouseButtonMiddle)
+	if mx != int(ctx.mposOld.X) || my != int(ctx.mposOld.Y) || click {
+		if ctx.focusedItem != nil {
+			ctx.focusedItem.keyboardMenu = false
+		}
 	}
 	if click {
-		activeSearch = nil
-		scrollbarClick := selectedTextItem != nil && selectedTextItem.editScrollbarAt(mpos) != PART_NONE
-		if !scrollbarClick && (!shiftPressed || selectedTextItem == nil || !selectedTextItem.DrawRect.containsPoint(mpos)) {
-			clearTextSelection()
+		ctx.activeSearch = nil
+		scrollbarClick := ctx.selectedTextItem != nil && ctx.selectedTextItem.editScrollbarAt(mpos) != PART_NONE
+		if !scrollbarClick && (!shiftPressed || ctx.selectedTextItem == nil || !ctx.selectedTextItem.DrawRect.containsPoint(mpos)) {
+			ctx.clearTextSelection()
 		}
-		if !dropdownOpenContainsAnywhere(mpos) {
-			closeAllDropdowns()
+		if !ctx.dropdownOpenContainsAnywhere(mpos) {
+			ctx.closeAllDropdowns()
 		}
 		// Close context menus when clicking anywhere outside them.
-		if !contextMenuContainsAnywhere(mpos) {
-			CloseContextMenus()
+		if !ctx.contextMenuContainsAnywhere(mpos) {
+			ctx.CloseContextMenus()
 		}
-		if focusedItem != nil {
-			focusedItem.Focused = false
-			focusedItem.markDirty()
-		}
-		focusedItem = nil
+		ctx.ClearFocus(ctx.focusedItem)
 	}
-	clickTime := pointerPressDuration()
+	clickTime := ctx.pointerPressDuration()
 	clickDrag := clickTime > 1
 	midClickTime := 0
 	midPressed := false
-	if middleClickMove {
-		midClickTime = inpututil.MouseButtonPressDuration(ebiten.MouseButtonMiddle)
-		midPressed = ebiten.IsMouseButtonPressed(ebiten.MouseButtonMiddle)
+	if ctx.middleClickMove {
+		midClickTime = ctx.mousePressDuration(ebiten.MouseButtonMiddle)
+		midPressed = ctx.mousePressed(ebiten.MouseButtonMiddle)
 	}
 	midClickDrag := midClickTime > 1
 
-	if !pointerPressed() && !midPressed {
-		if activeItem != nil {
-			activeItem.emitSliderReleased()
-			if activeItem.textEdit != nil {
-				activeItem.textEdit.scrollDrag = PART_NONE
+	if (!ctx.pointerPressed() || ctx.sampledInput.primaryEnded) && !midPressed {
+		if ctx.activeItem != nil {
+			ctx.activeItem.emitSliderReleased()
+			if ctx.activeItem.textEdit != nil {
+				ctx.activeItem.textEdit.scrollDrag = PART_NONE
 			}
 		}
-		if selectedTextItem != nil && selectedTextItem.selecting {
-			selectedTextItem.selecting = false
-			selectedTextItem.markDirty()
+		if ctx.selectedTextItem != nil && ctx.selectedTextItem.selecting {
+			ctx.selectedTextItem.selecting = false
+			ctx.selectedTextItem.markDirty()
 		}
-		dragPart = PART_NONE
-		dragWin = nil
-		dragFlow = nil
-		activeItem = nil
-		downWin = nil
+		ctx.dragPart = PART_NONE
+		ctx.dragWin = nil
+		ctx.dragFlow = nil
+		ctx.activeItem = nil
+		ctx.downWin = nil
 	}
 
-	wx, wy := pointerWheel()
+	if click || midClick {
+		ctx.downWin = windowAtPointer(orderedWindows, mpos)
+	}
+	wx, wy := ctx.pointerWheel()
 	wheelDelta := point{X: float32(wx), Y: float32(wy)}
 
-	delta := pointSub(mpos, mposOld)
+	delta := pointSub(mpos, ctx.mposOld)
 	c := ebiten.CursorShapeDefault
-	if dividerHandled, dividerCursor := updateTileDividerInput(mpos, click); dividerCursor != ebiten.CursorShapeDefault {
+	if dividerHandled, dividerCursor := ctx.updateTileDividerInput(mpos, click); dividerCursor != ebiten.CursorShapeDefault {
 		c = dividerCursor
 		if dividerHandled {
-			pointerPressHandled = true
+			ctx.pointerPressHandled = true
 			click = false
 			midClick = false
-			downWin = nil
+			ctx.downWin = nil
 		}
 	}
 
 	var chars []rune
-	if !keyboardInputCaptured && !mods.SuppressText() {
-		chars = ebiten.AppendInputChars(inputBuf[:0])
+	if !ctx.keyboardInputCaptured && !mods.SuppressText() {
+		chars = []rune(ctx.sampledInput.text)
 	}
 
 	// First, give active context menus a chance to handle the click/hover.
-	if handleContextMenus(mpos, click) {
-		pointerPressHandled = click
+	if ctx.handleContextMenus(mpos, click) {
+		ctx.pointerPressHandled = click
 		// If a context menu handled the interaction, avoid passing the click to windows.
 		// Still continue with cursor updates and general housekeeping below.
 		click = false
@@ -194,8 +171,8 @@ func Update() error {
 
 		var part dragType
 		handled := false
-		if dragPart != PART_NONE && dragWin == win {
-			part = dragPart
+		if ctx.dragPart != PART_NONE && ctx.dragWin == win {
+			part = ctx.dragPart
 		} else {
 			localPos := point{X: mpos.X / s, Y: mpos.Y / s}
 			part = win.getWindowPart(localPos, click)
@@ -209,7 +186,7 @@ func Update() error {
 			// including the tolerance outside the visible border.
 			handled = part >= PART_TOP && part <= PART_TOP_LEFT
 
-			if dragPart == PART_NONE && c == ebiten.CursorShapeDefault {
+			if ctx.dragPart == PART_NONE && c == ebiten.CursorShapeDefault {
 				switch part {
 				case PART_BAR:
 					c = ebiten.CursorShapeMove
@@ -226,8 +203,8 @@ func Update() error {
 				}
 			}
 
-			if click && dragPart == PART_NONE && downWin == win {
-				pointerPressHandled = true
+			if click && ctx.dragPart == PART_NONE && ctx.downWin == win {
+				ctx.pointerPressHandled = true
 				if part == PART_CLOSE {
 					win.Close()
 					break
@@ -253,58 +230,58 @@ func Update() error {
 					}
 					break
 				}
-				dragPart = part
-				dragWin = win
-			} else if midClick && dragPart == PART_NONE && part == PART_BAR && downWin == win {
-				dragPart = part
-				dragWin = win
-			} else if (clickDrag || midClickDrag) && dragPart != PART_NONE && dragWin == win {
-				geometryDragBlocked := win.Docked || (dragPart == PART_BAR && !win.Movable) ||
-					(dragPart >= PART_TOP && dragPart <= PART_TOP_LEFT && !win.Resizable)
-				if geometryDragBlocked && dragPart != PART_SCROLL_V && dragPart != PART_SCROLL_H {
-					dragPart = PART_NONE
-					dragWin = nil
+				ctx.dragPart = part
+				ctx.dragWin = win
+			} else if midClick && ctx.dragPart == PART_NONE && part == PART_BAR && ctx.downWin == win {
+				ctx.dragPart = part
+				ctx.dragWin = win
+			} else if (clickDrag || midClickDrag) && ctx.dragPart != PART_NONE && ctx.dragWin == win {
+				geometryDragBlocked := win.Docked || (ctx.dragPart == PART_BAR && !win.Movable) ||
+					(ctx.dragPart >= PART_TOP && ctx.dragPart <= PART_TOP_LEFT && !win.Resizable)
+				if geometryDragBlocked && ctx.dragPart != PART_SCROLL_V && ctx.dragPart != PART_SCROLL_H {
+					ctx.dragPart = PART_NONE
+					ctx.dragWin = nil
 					break
 				}
-				switch dragPart {
+				switch ctx.dragPart {
 				case PART_BAR:
-					dragWindowMove(win, posCh)
+					ctx.dragWindowMove(win, posCh)
 				case PART_TOP, PART_BOTTOM, PART_LEFT, PART_RIGHT,
 					PART_TOP_LEFT, PART_TOP_RIGHT, PART_BOTTOM_LEFT, PART_BOTTOM_RIGHT:
-					dragWindowResize(win, dragPart, posCh)
+					ctx.dragWindowResize(win, ctx.dragPart, posCh)
 				case PART_SCROLL_V:
-					if dragFlow != nil {
-						dragFlowScroll(dragFlow, mpos, true)
+					if ctx.dragFlow != nil {
+						ctx.dragFlowScroll(ctx.dragFlow, mpos, true)
 					} else {
-						dragWindowScroll(win, mpos, true)
+						ctx.dragWindowScroll(win, mpos, true)
 					}
 				case PART_SCROLL_H:
-					if dragFlow != nil {
-						dragFlowScroll(dragFlow, mpos, false)
+					if ctx.dragFlow != nil {
+						ctx.dragFlowScroll(ctx.dragFlow, mpos, false)
 					} else {
-						dragWindowScroll(win, mpos, false)
+						ctx.dragWindowScroll(win, mpos, false)
 					}
 				}
-				if dragPart != PART_BAR && dragPart != PART_SCROLL_V && dragPart != PART_SCROLL_H {
-					if windowSnapping {
-						snapResize(win, dragPart)
+				if ctx.dragPart != PART_BAR && ctx.dragPart != PART_SCROLL_V && ctx.dragPart != PART_SCROLL_H {
+					if ctx.windowSnapping {
+						ctx.snapResize(win, ctx.dragPart)
 					}
 				}
 				win.clampToScreen()
-				if dragPart == PART_BAR {
-					snapMovedWindow(win)
+				if ctx.dragPart == PART_BAR {
+					ctx.snapMovedWindow(win)
 				}
 				break
 			}
 		} else if win.searchOpen {
-			if dragPart == PART_NONE && c == ebiten.CursorShapeDefault {
+			if ctx.dragPart == PART_NONE && c == ebiten.CursorShapeDefault {
 				if win.searchBoxRect().containsPoint(mpos) {
 					c = ebiten.CursorShapeText
 				} else if win.searchCloseRect().containsPoint(mpos) {
 					c = ebiten.CursorShapePointer
 				}
 			}
-			if click && dragPart == PART_NONE && downWin == win {
+			if click && ctx.dragPart == PART_NONE && ctx.downWin == win {
 				if win.searchCloseRect().containsPoint(mpos) {
 					win.closeSearch()
 					handled = true
@@ -317,13 +294,13 @@ func Update() error {
 
 		// Window items
 		prevWinHovered := win.Hovered
-		prevActiveWindow := activeWindow
+		prevActiveWindow := ctx.activeWindow
 		win.Hovered = false
 		if !handled {
 			handled = win.clickWindowItems(mpos, click)
 		}
 		if click && handled {
-			pointerPressHandled = true
+			ctx.pointerPressHandled = true
 		}
 		if win.Hovered != prevWinHovered {
 			win.markDirty()
@@ -334,10 +311,10 @@ func Update() error {
 		// event. The check includes clicks on dropdown menus which may
 		// have closed during handling. Also consider context menus so a
 		// right-click menu doesn't cause window activation behind it.
-		if handled || win.containsPointer(mpos) || dropdownOpenContains(win.Contents, mpos) || contextMenuContainsAnywhere(mpos) {
+		if handled || win.containsPointer(mpos) || ctx.dropdownOpenContains(win.Contents, mpos) || ctx.contextMenuContainsAnywhere(mpos) {
 			if click || midClick {
-				if activeWindow == prevActiveWindow {
-					if activeWindow != win || windows[len(windows)-1] != win {
+				if ctx.activeWindow == prevActiveWindow {
+					if ctx.activeWindow != win || ctx.windows[len(ctx.windows)-1] != win {
 						win.BringForward()
 					}
 				}
@@ -346,144 +323,141 @@ func Update() error {
 		}
 	}
 
-	if activeItem != nil && activeItem.textEdit != nil && pointerPressed() && !click {
-		activeItem.dragEditScrollbar(mpos)
+	// A slider owns its press until release, including outside its hit rectangle.
+	// Process it once per tick, including the initial press, after hit testing has
+	// established capture. This also makes short track clicks change the value.
+	if item := ctx.activeItem; item != nil && item.ItemType == ITEM_SLIDER && ctx.pointerPressed() && ctx.downWin == item.ParentWindow && focusAvailable(item) {
+		scale := float32(1)
+		if ctx.CtrlPressed {
+			scale = 1.0 / 8.0
+		}
+		item.setSliderValueWithModifiers(mpos, ctx.ShiftPressed, scale)
 	}
-	if selectedTextItem != nil && selectedTextItem.selecting && pointerPressed() && !click {
-		if itemHandlesTextEditing(selectedTextItem) {
-			selectedTextItem.dragEditableText(mpos)
+
+	if ctx.activeItem != nil && ctx.activeItem.textEdit != nil && ctx.pointerPressed() && !click {
+		ctx.activeItem.dragEditScrollbar(mpos)
+	}
+	if ctx.selectedTextItem != nil && ctx.selectedTextItem.selecting && ctx.pointerPressed() && !click {
+		if itemHandlesTextEditing(ctx.selectedTextItem) {
+			ctx.selectedTextItem.dragEditableText(mpos)
 		} else {
-			idx := selectedTextItem.cursorIndexAt(mpos)
-			if idx != selectedTextItem.SelectEnd {
-				selectedTextItem.SelectEnd = idx
-				if itemAcceptsTextEditing(selectedTextItem) {
-					selectedTextItem.CursorPos = idx
+			idx := ctx.selectedTextItem.cursorIndexAt(mpos)
+			if idx != ctx.selectedTextItem.SelectEnd {
+				ctx.selectedTextItem.SelectEnd = idx
+				if itemAcceptsTextEditing(ctx.selectedTextItem) {
+					ctx.selectedTextItem.CursorPos = idx
 				}
-				selectedTextItem.markDirty()
+				ctx.selectedTextItem.markDirty()
 			}
 		}
 	}
 
-	if hoveredItem != nil && hoveredItem.ItemType == ITEM_TEXT && hoveredItem.OnURLClick != nil && c == ebiten.CursorShapeDefault {
-		if hoveredItem.urlAtChar(hoveredItem.cursorIndexAt(mpos)) != "" {
+	if ctx.hoveredItem != nil && ctx.hoveredItem.ItemType == ITEM_TEXT && ctx.hoveredItem.OnURLClick != nil && c == ebiten.CursorShapeDefault {
+		if ctx.hoveredItem.urlAtChar(ctx.hoveredItem.cursorIndexAt(mpos)) != "" {
 			c = ebiten.CursorShapePointer
 		}
 	}
 
-	if hoveredItem != nil && !hoveredItem.Disabled && hoveredItem.editScrollbarAt(mpos) == PART_NONE && (itemAcceptsTextEditing(hoveredItem) || hoveredItem.SelectableText) && c == ebiten.CursorShapeDefault {
+	if ctx.hoveredItem != nil && !ctx.hoveredItem.isDisabled() && ctx.hoveredItem.editScrollbarAt(mpos) == PART_NONE && (itemAcceptsTextEditing(ctx.hoveredItem) || ctx.hoveredItem.SelectableText) && c == ebiten.CursorShapeDefault {
 		c = ebiten.CursorShapeText
-		if _, ok := hoveredItem.textSwatchAt(mpos); ok && !shiftPressed {
+		if _, ok := ctx.hoveredItem.textSwatchAt(mpos); ok && !shiftPressed {
 			c = ebiten.CursorShapePointer
 		}
 	}
-	if cursorShape != c {
+	// The OS cursor is shared by Ebitengine's window. A disabled context
+	// records its requested shape without overwriting the active interface.
+	if ctx.inputEnabled && ebiten.CursorShape() != c {
 		ebiten.SetCursorShape(c)
-		cursorShape = c
+	}
+	ctx.cursorShape = c
+
+	if ctx.focusedItem != nil && !focusAvailable(ctx.focusedItem) {
+		ctx.ClearFocus(ctx.focusedItem)
 	}
 
-	if !keyboardInputCaptured && mods.Shortcut() && inpututil.IsKeyJustPressed(ebiten.KeyC) && selectedTextItem != nil {
-		if selected := selectedTextItem.SelectedText(); selected != "" {
-			_, _ = clipboard.Write(context.Background(), clipboard.FmtText, []byte(selected))
+	imeHandled, suppressText, err := ctx.pollTextInput()
+	if err != nil {
+		return err
+	}
+	if suppressText {
+		chars = nil
+	}
+	keyboardAllowed := !ctx.keyboardInputCaptured && !ctx.sampledInput.unfocused && !imeHandled
+	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyCapsLock) {
+		if ctx.CapsLockToggleHandler != nil {
+			ctx.CapsLockToggleHandler()
 		}
 	}
 
-	if focusedItem != nil && !itemAcceptsTextEditing(focusedItem) {
-		focusedItem.Focused = false
-		focusedItem.markDirty()
-		focusedItem = nil
+	if keyboardAllowed && ctx.activeWindow != nil && ctx.activeWindow.Open {
+		if mods.Shortcut() && ctx.keyJustPressed(ebiten.KeyF) {
+			ctx.activeWindow.OpenSearch()
+		}
+		if ctx.keyJustPressed(ebiten.KeyF3) && ctx.activeWindow.OnSearchNext != nil {
+			ctx.activeWindow.OnSearchNext(shiftPressed)
+		}
 	}
 
-	textKeyboardHandled := false
-	if focusedItem != nil && activeSearch == nil && !keyboardInputCaptured && itemHandlesTextEditing(focusedItem) {
-		textKeyboardHandled = focusedItem.updateTextEditing(chars, mods, shiftPressed)
-	}
-	if focusedItem != nil && itemHandlesTextEditing(focusedItem) {
-		focusedItem.updateCaretBlink(updateNow)
+	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyF6) {
+		ctx.focusNextWindow(shiftPressed)
 	}
 
-	if keyboardInputCaptured {
-		// Keep pointer-driven window controls active, but reserve all keyboard
-		// input for the caller while it is showing a keyboard tester.
-	} else if activeSearch != nil {
-		for _, r := range chars {
-			if r >= 32 && r != 127 && r != '\r' && r != '\n' {
-				if len([]rune(activeSearch.SearchText)) < 64 {
-					activeSearch.SearchText += string(r)
-					if activeSearch.OnSearch != nil {
-						activeSearch.OnSearch(activeSearch.SearchText)
-					}
-					activeSearch.markDirty()
-				}
-			}
+	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyGraveAccent) && shiftPressed {
+		_ = ctx.DumpTree()
+	}
+	if keyboardAllowed && mods.Shortcut() && ctx.keyJustPressed(ebiten.KeyC) && ctx.selectedTextItem != nil {
+		if selected := ctx.selectedTextItem.SelectedText(); selected != "" {
+			_ = ctx.writeClipboard(selected)
 		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyBackspace) {
-			runes := []rune(activeSearch.SearchText)
-			if len(runes) > 0 {
-				activeSearch.SearchText = string(runes[:len(runes)-1])
-				if activeSearch.OnSearch != nil {
-					activeSearch.OnSearch(activeSearch.SearchText)
-				}
-				activeSearch.markDirty()
-			}
+	}
+
+	textKeyboardHandled := imeHandled
+	if keyboardAllowed && ctx.focusedItem != nil && ctx.activeSearch == nil && ctx.activeContextMenu() == nil && itemHandlesTextEditing(ctx.focusedItem) {
+		textKeyboardHandled = ctx.focusedItem.updateTextEditing(chars, mods, shiftPressed)
+	}
+	if target := ctx.textInputTarget(); target != nil {
+		target.updateCaretBlink(ctx.updateNow)
+	}
+
+	if !keyboardAllowed {
+		// IME-owned keys and host capture must not activate UI shortcuts.
+	} else if ctx.activeContextMenu() != nil {
+		ctx.pollControlKeyboard(shiftPressed, mods)
+		if ctx.keyJustPressed(ebiten.KeyTab) {
+			ctx.CloseContextMenus()
+			ctx.tabFocus(shiftPressed)
 		}
-		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-			activeSearch.closeSearch()
-		} else if (inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter)) && activeSearch.OnSearchNext != nil {
-			activeSearch.OnSearchNext(shiftPressed)
+	} else if ctx.activeSearch != nil {
+		win := ctx.activeSearch
+		target := win.ensureSearchInput()
+		target.updateTextEditing(chars, mods, shiftPressed)
+		if ctx.keyJustPressed(ebiten.KeyEscape) {
+			win.closeSearch()
+		} else if (ctx.keyJustPressed(ebiten.KeyEnter) || ctx.keyJustPressed(ebiten.KeyKPEnter)) && win.OnSearchNext != nil {
+			win.OnSearchNext(shiftPressed)
 		}
 	} else {
-		if !textKeyboardHandled && (inpututil.IsKeyJustPressed(ebiten.KeyEnter) || inpututil.IsKeyJustPressed(ebiten.KeyKPEnter)) {
-			if activeWindow != nil && activeWindow.Open && activeWindow.DefaultButton != nil {
-				btn := activeWindow.DefaultButton
-				if !btn.Disabled && !btn.isInvisible() {
-					activeItem = btn
-					btn.Clicked = updateNow
-					if btn.Handler != nil {
-						btn.Handler.Emit(UIEvent{Item: btn, Type: EventClick})
-					}
-					btn.markDirty()
-				}
+		controlHandled := false
+		if !textKeyboardHandled {
+			controlHandled = ctx.pollControlKeyboard(shiftPressed, mods)
+		}
+		if !textKeyboardHandled && !controlHandled && (ctx.keyJustPressed(ebiten.KeyEnter) || ctx.keyJustPressed(ebiten.KeyKPEnter)) {
+			if ctx.activeWindow != nil && ctx.activeWindow.Open {
+				ctx.activateControl(ctx.activeWindow.DefaultButton)
 			}
 		}
-
-		if !textKeyboardHandled && inpututil.IsKeyJustPressed(ebiten.KeyTab) {
-			if activeWindow != nil && activeWindow.Open {
-				var inputs []*itemData
-				collectInputs(activeWindow.Contents, &inputs)
-				if len(inputs) > 0 {
-					idx := -1
-					for i, it := range inputs {
-						if it == focusedItem {
-							idx = i
-							break
-						}
-					}
-					next := 0
-					if shiftPressed {
-						if idx == -1 {
-							next = len(inputs) - 1
-						} else {
-							next = (idx - 1 + len(inputs)) % len(inputs)
-						}
-					} else {
-						if idx == -1 {
-							next = 0
-						} else {
-							next = (idx + 1) % len(inputs)
-						}
-					}
-					if focusedItem != nil {
-						focusedItem.Focused = false
-						focusedItem.markDirty()
-					}
-					focusedItem = inputs[next]
-					Focus(focusedItem)
-				}
-			}
+		if !textKeyboardHandled && ctx.keyJustPressed(ebiten.KeyTab) {
+			ctx.tabFocus(shiftPressed)
 		}
 	}
+	if keyboardAllowed && ctx.keyJustPressed(ebiten.KeyEscape) {
+		ctx.closeAllDropdowns()
+	}
+	if ctx.keyboardInputCaptured {
+		ctx.finishKeyboardSlider()
+	}
 
-	mposOld = mpos
+	ctx.mposOld = mpos
 
 	if wheelDelta.X != 0 || wheelDelta.Y != 0 {
 		for _, win := range orderedWindows {
@@ -491,27 +465,27 @@ func Update() error {
 				continue
 			}
 			// Give context menus first chance at scroll.
-			if scrollContextMenus(mpos, wheelDelta) {
+			if ctx.scrollContextMenus(mpos, wheelDelta) {
 				break
 			}
-			if win.getMainRect().containsPoint(mpos) || dropdownOpenContains(win.Contents, mpos) {
-				if scrollDropdown(win.Contents, mpos, wheelDelta) {
+			if win.getMainRect().containsPoint(mpos) || ctx.dropdownOpenContains(win.Contents, mpos) {
+				if ctx.scrollDropdown(win.Contents, mpos, wheelDelta) {
 					break
 				}
-				if scrollEditable(win.Contents, mpos, wheelDelta, mods) {
+				if ctx.scrollEditable(win.Contents, mpos, wheelDelta, mods) {
 					break
 				}
-				if scrollFlow(win.Contents, mpos, wheelDelta) {
+				if ctx.scrollFlow(win.Contents, mpos, wheelDelta) {
 					break
 				}
-				if scrollWindow(win, wheelDelta) {
+				if ctx.scrollWindow(win, wheelDelta) {
 					break
 				}
 			}
 		}
 	}
 
-	if hoveredItem != prevHovered {
+	if ctx.hoveredItem != prevHovered {
 		if prevHovered != nil {
 			prevHovered.Hovered = false
 			prevHovered.markDirty()
@@ -524,9 +498,9 @@ func Update() error {
 	// own layout updates whenever sizes change, so avoid doing it every
 	// frame here.
 
-	for _, win := range windows {
+	for _, win := range ctx.windows {
 		if win.Open {
-			clearExpiredClicksAt(win.Contents, updateNow)
+			clearExpiredClicksAt(win.Contents, ctx.updateNow)
 		}
 	}
 
@@ -541,33 +515,35 @@ func (item *itemData) emitSliderReleased() {
 		return
 	}
 	item.dragStartInit = false
-	if item.Value == item.dragStartValue || item.Handler == nil {
+	if item.Value == item.dragStartValue {
 		return
 	}
-	item.Handler.Emit(UIEvent{Item: item, Type: EventSliderReleased, Value: item.Value})
+	item.emitEvent(UIEvent{Type: EventSliderReleased, Value: item.Value})
 }
 
-func windowsFrontToBack() []*windowData {
-	inputWindowOrder = inputWindowOrder[:0]
-	for i := len(windows) - 1; i >= 0; i-- {
-		if !windows[i].Docked {
-			inputWindowOrder = append(inputWindowOrder, windows[i])
+func (ctx *Context) windowsFrontToBack() []*windowData {
+	ctx.inputWindowOrder = ctx.inputWindowOrder[:0]
+	for i := len(ctx.windows) - 1; i >= 0; i-- {
+		if !ctx.windows[i].Docked {
+			ctx.inputWindowOrder = append(ctx.inputWindowOrder, ctx.windows[i])
 		}
 	}
-	for i := len(windows) - 1; i >= 0; i-- {
-		if windows[i].Docked {
-			inputWindowOrder = append(inputWindowOrder, windows[i])
+	for i := len(ctx.windows) - 1; i >= 0; i-- {
+		if ctx.windows[i].Docked {
+			ctx.inputWindowOrder = append(ctx.inputWindowOrder, ctx.windows[i])
 		}
 	}
-	return inputWindowOrder
+	return ctx.inputWindowOrder
 }
 
 func (win *windowData) clickWindowItems(mpos point, click bool) bool {
+	ctx := win.ui()
+
 	// If the mouse isn't within the window or any open dropdown, just return
-	if !win.getMainRect().containsPoint(mpos) && !dropdownOpenContains(win.Contents, mpos) {
+	if !win.getMainRect().containsPoint(mpos) && !ctx.dropdownOpenContains(win.Contents, mpos) {
 		return false
 	}
-	if clickOpenDropdown(win.Contents, mpos, click) {
+	if ctx.clickOpenDropdown(win.Contents, mpos, click) {
 		return true
 	}
 	win.Hovered = true
@@ -579,10 +555,10 @@ func (win *windowData) clickWindowItems(mpos point, click bool) bool {
 		handled := false
 		if item.ItemType == ITEM_FLOW {
 			if part := item.getScrollbarPart(mpos); part != PART_NONE {
-				if click && dragPart == PART_NONE && downWin == win {
-					dragPart = part
-					dragWin = win
-					dragFlow = item
+				if click && ctx.dragPart == PART_NONE && ctx.downWin == win {
+					ctx.dragPart = part
+					ctx.dragWin = win
+					ctx.dragFlow = item
 				}
 				return true
 			}
@@ -598,48 +574,41 @@ func (win *windowData) clickWindowItems(mpos point, click bool) bool {
 }
 
 func (item *itemData) clickFlows(mpos point, click bool) bool {
+	ctx := item.ui()
+
 	if item.isInvisible() {
 		return false
 	}
-	if item.Disabled {
+	if item.isDisabled() {
 		return item.DrawRect.containsPoint(mpos)
 	}
 	if part := item.getScrollbarPart(mpos); part != PART_NONE {
-		if click && dragPart == PART_NONE && downWin == item.ParentWindow {
-			dragPart = part
-			dragWin = item.ParentWindow
-			dragFlow = item
+		if click && ctx.dragPart == PART_NONE && ctx.downWin == item.ParentWindow {
+			ctx.dragPart = part
+			ctx.dragWin = item.ParentWindow
+			ctx.dragFlow = item
 		}
 		return true
 	}
 	if len(item.Tabs) > 0 {
-		if item.ActiveTab >= len(item.Tabs) {
-			item.ActiveTab = 0
-		}
+		item.normalizeTabs()
 		for i, tab := range item.Tabs {
 			tab.Hovered = false
 			if tab.DrawRect.containsPoint(mpos) {
 				tab.Hovered = true
-				hoveredItem = tab
-				if click {
-					activeItem = tab
-					tab.Clicked = updateNow
-					if item.ActiveTab != i {
-						item.ActiveTab = i
-						item.Scroll = point{}
-						// Tab contents can have different dimensions. Refreshing here
-						// both lays out the newly active tab and invalidates cached
-						// window rendering so the click is visible immediately.
-						if item.ParentWindow != nil {
-							item.ParentWindow.Refresh()
-						}
-					}
+				ctx.hoveredItem = tab
+				if click && !tab.Disabled && !tab.Invisible {
+					ctx.focusControl(item, false)
+					ctx.activeItem = tab
+					tab.Clicked = ctx.updateNow
+					changeActiveTab(item, i)
 				}
 				return true
 			}
 		}
-		for i := len(item.Tabs[item.ActiveTab].Contents) - 1; i >= 0; i-- {
-			subItem := item.Tabs[item.ActiveTab].Contents[i]
+		contents := item.activeContents()
+		for i := len(contents) - 1; i >= 0; i-- {
+			subItem := contents[i]
 			if subItem.ItemType == ITEM_FLOW {
 				if subItem.clickFlows(mpos, click) {
 					return true
@@ -668,23 +637,25 @@ func (item *itemData) clickFlows(mpos point, click bool) bool {
 }
 
 func (item *itemData) clickItem(mpos point, click bool) bool {
+	ctx := item.ui()
+
 	if item.isInvisible() {
 		return false
 	}
-	if item.Disabled {
+	if item.isDisabled() {
 		inside := item.DrawRect.containsPoint(mpos)
 		if inside && item.Tooltip != "" {
-			hoveredItem = item
+			ctx.hoveredItem = item
 		}
 		return inside
 	}
-	if pointerPressed() && activeItem != nil && activeItem != item {
+	if ctx.pointerPressed() && ctx.activeItem != nil && ctx.activeItem != item {
 		return false
 	}
 	// For dropdowns check the expanded option area as well
 	if !item.DrawRect.containsPoint(mpos) {
 		if !(item.ItemType == ITEM_DROPDOWN && item.Open && func() bool {
-			r, _ := dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
+			r, _ := ctx.dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
 			return r.containsPoint(mpos)
 		}()) {
 			return false
@@ -692,20 +663,21 @@ func (item *itemData) clickItem(mpos point, click bool) bool {
 	}
 
 	if click {
-		activeItem = item
-		item.Clicked = updateNow
+		ctx.focusControl(item, false)
+		ctx.activeItem = item
+		item.Clicked = ctx.updateNow
 		if itemHandlesTextEditing(item) {
-			if span, ok := item.textSwatchAt(mpos); ok && !ShiftPressed {
+			if span, ok := item.textSwatchAt(mpos); ok && !ctx.ShiftPressed {
 				item.textSwatchClick(span)
 				return true
 			}
 			if part := item.editScrollbarAt(mpos); part != PART_NONE {
 				item.pressEditScrollbar(mpos, part)
-				item.Focused, focusedItem = true, item
-				activeSearch = nil
+				item.Focused, ctx.focusedItem = true, item
+				ctx.activeSearch = nil
 				return true
 			}
-			item.clickEditableText(mpos, ShiftPressed)
+			item.clickEditableText(mpos, ctx.ShiftPressed)
 			return true
 		}
 		if (item.ItemType == ITEM_TEXT || item.ItemType == ITEM_INPUT) && item.SelectableText {
@@ -713,9 +685,9 @@ func (item *itemData) clickItem(mpos point, click bool) bool {
 			item.SelectStart = idx
 			item.SelectEnd = idx
 			item.selecting = true
-			selectedTextItem = item
+			ctx.selectedTextItem = item
 			if itemAcceptsTextEditing(item) {
-				focusedItem = item
+				ctx.focusedItem = item
 				item.CursorPos = idx
 				item.Focused = true
 			}
@@ -733,63 +705,30 @@ func (item *itemData) clickItem(mpos point, click bool) bool {
 			item.dragStartValue = item.Value
 			item.dragStartInit = true
 		}
-		if item.ItemType == ITEM_BUTTON && item.Handler != nil {
-			item.Handler.Emit(UIEvent{Item: item, Type: EventClick})
+		if item.ItemType == ITEM_BUTTON || item.ItemType == ITEM_CHECKBOX || item.ItemType == ITEM_RADIO {
+			ctx.activateControl(item)
+			return true
 		}
 		item.markDirty()
 		if item.ItemType == ITEM_COLORWHEEL {
 			if col, ok := item.colorAt(mpos); ok {
-				item.WheelColor = col
-				item.markDirty()
-				if item.Handler != nil {
-					item.Handler.Emit(UIEvent{Item: item, Type: EventColorChanged, Color: col})
-				}
-				if item.OnColorChange != nil {
-					item.OnColorChange(col)
-				} else {
-					SetAccentColor(col)
-				}
+				item.setUserColor(col)
 			}
 		}
-		if item.ItemType == ITEM_CHECKBOX {
-			item.Checked = !item.Checked
-			item.markDirty()
-			if item.Handler != nil {
-				item.Handler.Emit(UIEvent{Item: item, Type: EventCheckboxChanged, Checked: item.Checked})
-			}
-		} else if item.ItemType == ITEM_RADIO {
-			item.Checked = true
-			// uncheck others in group
-			if item.RadioGroup != "" {
-				uncheckRadioGroup(item.Parent, item.RadioGroup, item)
-			}
-			item.markDirty()
-			if item.Handler != nil {
-				item.Handler.Emit(UIEvent{Item: item, Type: EventRadioSelected, Checked: true})
-			}
-		} else if itemAcceptsTextEditing(item) {
-			focusedItem = item
-			focusedItem.CursorPos = item.cursorIndexAt(mpos)
+		if itemAcceptsTextEditing(item) {
+			ctx.focusedItem = item
+			ctx.focusedItem.CursorPos = item.cursorIndexAt(mpos)
 			item.Focused = true
 			item.markDirty()
 		} else if item.ItemType == ITEM_DROPDOWN {
 			if item.Open {
-				optionH := dropdownOptionHeight(item)
-				r, _ := dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
+				optionH := ctx.dropdownOptionHeight(item)
+				r, _ := ctx.dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
 				startY := r.Y0
 				if r.containsPoint(mpos) {
 					idx := int((mpos.Y - startY + item.Scroll.Y) / optionH)
 					if idx >= 0 && idx < len(item.Options) {
-						item.Selected = idx
-						item.Open = false
-						item.markDirty()
-						if item.Handler != nil {
-							item.Handler.Emit(UIEvent{Item: item, Type: EventDropdownSelected, Index: idx})
-						}
-						if item.OnSelect != nil {
-							item.OnSelect(idx)
-						}
-						item.clearDropdownHover()
+						ctx.selectDropdownOption(item, idx)
 					}
 				} else {
 					item.Open = false
@@ -803,32 +742,19 @@ func (item *itemData) clickItem(mpos point, click bool) bool {
 				item.markDirty()
 			}
 		}
-		if item.Action != nil {
-			item.Action()
-			return true
-		}
 	} else {
 		if !item.Hovered {
 			item.Hovered = true
 			item.markDirty()
 		}
-		hoveredItem = item
-		if item.ItemType == ITEM_COLORWHEEL && pointerPressed() && downWin == item.ParentWindow {
+		ctx.hoveredItem = item
+		if item.ItemType == ITEM_COLORWHEEL && ctx.pointerPressed() && ctx.downWin == item.ParentWindow {
 			if col, ok := item.colorAt(mpos); ok {
-				item.WheelColor = col
-				item.markDirty()
-				if item.Handler != nil {
-					item.Handler.Emit(UIEvent{Item: item, Type: EventColorChanged, Color: col})
-				}
-				if item.OnColorChange != nil {
-					item.OnColorChange(col)
-				} else {
-					SetAccentColor(col)
-				}
+				item.setUserColor(col)
 			}
-		} else if item.ItemType == ITEM_DROPDOWN && item.Open {
-			optionH := dropdownOptionHeight(item)
-			r, _ := dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
+		} else if item.ItemType == ITEM_DROPDOWN && item.Open && !item.keyboardMenu {
+			optionH := ctx.dropdownOptionHeight(item)
+			r, _ := ctx.dropdownOpenRect(item, point{X: item.DrawRect.X0, Y: item.DrawRect.Y0})
 			startY := r.Y0
 			if r.containsPoint(mpos) {
 				idx := int((mpos.Y - startY + item.Scroll.Y) / optionH)
@@ -845,20 +771,7 @@ func (item *itemData) clickItem(mpos point, click bool) bool {
 				item.clearDropdownHover()
 			}
 		}
-		if item.ItemType == ITEM_SLIDER && pointerPressed() && downWin == item.ParentWindow {
-			// Modifiers: Shift snaps to integer; Ctrl = fine adjust (1/8th).
-			moveScale := float32(1)
-			if CtrlPressed {
-				moveScale = 1.0 / 8.0
-			}
-			// Only trigger Action when the value actually changes.
-			old := item.Value
-			item.setSliderValueWithModifiers(mpos, ShiftPressed, moveScale)
-			item.markDirty()
-			if item.Action != nil && item.Value != old {
-				item.Action()
-			}
-		}
+
 	}
 	return true
 }
@@ -907,24 +820,26 @@ func (item *itemData) SelectedText() string {
 	return string(runes[start:end])
 }
 
-func clearTextSelection() {
-	if selectedTextItem == nil {
+func (ctx *Context) clearTextSelection() {
+	if ctx.selectedTextItem == nil {
 		return
 	}
-	selectedTextItem.SelectStart = 0
-	selectedTextItem.SelectEnd = 0
-	selectedTextItem.selecting = false
-	selectedTextItem.markDirty()
-	selectedTextItem = nil
+	ctx.selectedTextItem.SelectStart = 0
+	ctx.selectedTextItem.SelectEnd = 0
+	ctx.selectedTextItem.selecting = false
+	ctx.selectedTextItem.markDirty()
+	ctx.selectedTextItem = nil
 }
 
 func (item *itemData) cursorIndexAt(mpos point) int {
+	ctx := item.ui()
+
 	if item.ItemType == ITEM_INPUT || itemHandlesTextEditing(item) {
 		return item.editCursorAt(mpos)
 	}
-	face := itemFace(item, item.FontSize*uiScale+2)
+	face := ctx.itemFace(item, item.FontSize*ctx.uiScale+2)
 	lines := strings.Split(item.Text, "\n")
-	lineHeight := (item.FontSize*uiScale + 2) * 1.2
+	lineHeight := (item.FontSize*ctx.uiScale + 2) * 1.2
 	origin := item.textDrawOrigin
 	if item.textDrawSize.X <= 0 {
 		origin = point{X: item.DrawRect.X0, Y: item.DrawRect.Y0}
@@ -944,16 +859,6 @@ func (item *itemData) cursorIndexAt(mpos point) int {
 		}
 	}
 	return pos + best
-}
-
-func uncheckRadioGroup(parent *itemData, group string, except *itemData) {
-	if parent == nil {
-		for _, win := range windows {
-			subUncheckRadio(win.Contents, group, except)
-		}
-	} else {
-		subUncheckRadio(parent.Contents, group, except)
-	}
 }
 
 func subUncheckRadio(list []*itemData, group string, except *itemData) {
@@ -998,11 +903,13 @@ func clearExpiredClicksAt(list []*itemData, now time.Time) {
 // shiftSnap: when true, snap to nearest integer.
 // moveScale: scales movement toward the pointer target (e.g., 1/8 for fine adjust).
 func (item *itemData) setSliderValueWithModifiers(mpos point, shiftSnap bool, moveScale float32) {
+	ctx := item.ui()
+
 	// Compute target from pointer using the base maths.
 	old := item.Value
 	// Recompute the target locally so we can adjust it before emitting events.
 	if item.Vertical {
-		knobH := item.AuxSize.Y * uiScale
+		knobH := item.AuxSize.Y * ctx.uiScale
 		height := item.DrawRect.Y1 - item.DrawRect.Y0 - knobH
 		if height <= 0 {
 			return
@@ -1030,20 +937,18 @@ func (item *itemData) setSliderValueWithModifiers(mpos point, shiftSnap bool, mo
 		if target != item.Value {
 			item.Value = target
 			item.markDirty()
-			if item.Handler != nil {
-				item.Handler.Emit(UIEvent{Item: item, Type: EventSliderChanged, Value: item.Value})
-			}
+			item.emitEvent(UIEvent{Type: EventSliderChanged, Value: item.Value})
 		}
 		return
 	}
 
 	// Horizontal
 	maxLabel := sliderMaxLabel
-	textSize := (item.FontSize * uiScale) + 2
-	face := textFace(textSize)
+	textSize := (item.FontSize * ctx.uiScale) + 2
+	face := ctx.textFace(textSize)
 	maxW, _ := text.Measure(maxLabel, face, 0)
-	knobW := item.AuxSize.X * uiScale
-	gap := currentStyle.SliderValueGap
+	knobW := item.AuxSize.X * ctx.uiScale
+	gap := ctx.currentStyle.SliderValueGap
 	if item.HideValue {
 		gap = 0
 		maxW = 0
@@ -1079,17 +984,17 @@ func (item *itemData) setSliderValueWithModifiers(mpos point, shiftSnap bool, mo
 	if target != item.Value {
 		item.Value = target
 		item.markDirty()
-		if item.Handler != nil {
-			item.Handler.Emit(UIEvent{Item: item, Type: EventSliderChanged, Value: item.Value})
-		}
+		item.emitEvent(UIEvent{Type: EventSliderChanged, Value: item.Value})
 	}
 }
 
 func (item *itemData) colorAt(mpos point) (Color, bool) {
-	size := point{X: item.Size.X * uiScale, Y: item.Size.Y * uiScale}
+	ctx := item.ui()
+
+	size := point{X: item.Size.X * ctx.uiScale, Y: item.Size.Y * ctx.uiScale}
 	offsetY := float32(0)
 	if item.Label != "" {
-		offsetY = (item.FontSize*uiScale + 2) + currentStyle.TextPadding*uiScale
+		offsetY = (item.FontSize*ctx.uiScale + 2) + ctx.currentStyle.TextPadding*ctx.uiScale
 	}
 	wheelSize := size.Y
 	if wheelSize > size.X {
@@ -1124,7 +1029,7 @@ func (item *itemData) colorAt(mpos point) (Color, bool) {
 	return Color(col), true
 }
 
-func scrollFlow(items []*itemData, mpos point, delta point) bool {
+func (ctx *Context) scrollFlow(items []*itemData, mpos point, delta point) bool {
 	for _, it := range items {
 		if it.Invisible {
 			continue
@@ -1138,12 +1043,12 @@ func scrollFlow(items []*itemData, mpos point, delta point) bool {
 				size := it.GetSize()
 				old := it.Scroll
 				if it.Scrollable {
-					if it.FlowType == FLOW_VERTICAL && req.Y > size.Y {
+					if it.verticalFlow() && req.Y > size.Y {
 						it.Scroll.Y -= delta.Y * 16
 						if it.Scroll.Y < 0 {
 							it.Scroll.Y = 0
 						}
-						slack := 4 * UIScale()
+						slack := 4 * ctx.UIScale()
 						max := req.Y - size.Y + slack
 						if it.Scroll.Y > max {
 							it.Scroll.Y = max
@@ -1152,12 +1057,12 @@ func scrollFlow(items []*itemData, mpos point, delta point) bool {
 							it.ParentWindow.markDirty()
 						}
 						return true
-					} else if it.FlowType == FLOW_HORIZONTAL && req.X > size.X {
+					} else if it.horizontalFlow() && req.X > size.X {
 						it.Scroll.X -= delta.X * 16
 						if it.Scroll.X < 0 {
 							it.Scroll.X = 0
 						}
-						slack := 4 * UIScale()
+						slack := 4 * ctx.UIScale()
 						max := req.X - size.X + slack
 						if it.Scroll.X > max {
 							it.Scroll.X = max
@@ -1176,16 +1081,8 @@ func scrollFlow(items []*itemData, mpos point, delta point) bool {
 					}
 				}
 			}
-			var sub []*itemData
-			if len(it.Tabs) > 0 {
-				if it.ActiveTab >= len(it.Tabs) {
-					it.ActiveTab = 0
-				}
-				sub = it.Tabs[it.ActiveTab].Contents
-			} else {
-				sub = it.Contents
-			}
-			if scrollFlow(sub, mpos, delta) {
+			sub := it.activeContents()
+			if ctx.scrollFlow(sub, mpos, delta) {
 				return true
 			}
 		}
@@ -1193,7 +1090,7 @@ func scrollFlow(items []*itemData, mpos point, delta point) bool {
 	return false
 }
 
-func scrollDropdown(items []*itemData, mpos point, delta point) bool {
+func (ctx *Context) scrollDropdown(items []*itemData, mpos point, delta point) bool {
 	for _, it := range items {
 		if it.Invisible {
 			continue
@@ -1202,8 +1099,8 @@ func scrollDropdown(items []*itemData, mpos point, delta point) bool {
 			continue
 		}
 		if it.ItemType == ITEM_DROPDOWN && it.Open {
-			optionH := dropdownOptionHeight(it)
-			r, _ := dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
+			optionH := ctx.dropdownOptionHeight(it)
+			r, _ := ctx.dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
 			openH := r.Y1 - r.Y0
 			if r.containsPoint(mpos) {
 				maxScroll := optionH*float32(len(it.Options)) - openH
@@ -1226,22 +1123,14 @@ func scrollDropdown(items []*itemData, mpos point, delta point) bool {
 				return true
 			}
 		}
-		if len(it.Tabs) > 0 {
-			if it.ActiveTab >= len(it.Tabs) {
-				it.ActiveTab = 0
-			}
-			if scrollDropdown(it.Tabs[it.ActiveTab].Contents, mpos, delta) {
-				return true
-			}
-		}
-		if scrollDropdown(it.Contents, mpos, delta) {
+		if ctx.scrollDropdown(it.activeContents(), mpos, delta) {
 			return true
 		}
 	}
 	return false
 }
 
-func scrollWindow(win *windowData, delta point) bool {
+func (ctx *Context) scrollWindow(win *windowData, delta point) bool {
 	if win.NoScroll {
 		return false
 	}
@@ -1258,7 +1147,7 @@ func scrollWindow(win *windowData, delta point) bool {
 		if win.Scroll.Y < 0 {
 			win.Scroll.Y = 0
 		}
-		slack := 4 * UIScale()
+		slack := 4 * ctx.UIScale()
 		max := req.Y - avail.Y + slack
 		if win.Scroll.Y > max {
 			win.Scroll.Y = max
@@ -1272,7 +1161,7 @@ func scrollWindow(win *windowData, delta point) bool {
 		if win.Scroll.X < 0 {
 			win.Scroll.X = 0
 		}
-		slack := 4 * UIScale()
+		slack := 4 * ctx.UIScale()
 		max := req.X - avail.X + slack
 		if win.Scroll.X > max {
 			win.Scroll.X = max
@@ -1287,7 +1176,7 @@ func scrollWindow(win *windowData, delta point) bool {
 	return handled
 }
 
-func dragWindowMove(win *windowData, delta point) {
+func (ctx *Context) dragWindowMove(win *windowData, delta point) {
 	// Re-check ownership at execution time. A workspace can dock a window while
 	// a pointer drag is already active, and that stale drag must not move it.
 	if win == nil || win.Docked || !win.Movable {
@@ -1299,7 +1188,7 @@ func dragWindowMove(win *windowData, delta point) {
 	win.resizeSnapAnchorX = false
 	win.resizeSnapAnchorY = false
 	if win.zone == nil {
-		if windowSnapping && win.snapAnchorActive {
+		if ctx.windowSnapping && win.snapAnchorActive {
 			win.snapDragPosition = pointAdd(win.snapDragPosition, delta)
 			if win.snapAnchorX && math.Abs(float64(win.snapDragPosition.X-win.snapAnchor.X)) > float64(UnsnapThreshold) {
 				win.snapAnchorX = false
@@ -1327,7 +1216,7 @@ func dragWindowMove(win *windowData, delta point) {
 // dragWindowResize constrains the dragged edges before setSize can reposition
 // the window to fit the screen. The opposite edges stay fixed, including when
 // a corner reaches the minimum size on only one axis. Delta uses window units.
-func dragWindowResize(win *windowData, part dragType, delta point) bool {
+func (ctx *Context) dragWindowResize(win *windowData, part dragType, delta point) bool {
 	if win == nil || win.Docked || !win.Resizable {
 		return false
 	}
@@ -1337,7 +1226,7 @@ func dragWindowResize(win *windowData, part dragType, delta point) bool {
 	}
 	left, top := win.Position.X, win.Position.Y
 	right, bottom := left+win.Size.X, top+win.Size.Y
-	sw, sh := float32(screenWidth)/win.scale(), float32(screenHeight)/win.scale()
+	sw, sh := float32(ctx.screenWidth)/win.scale(), float32(ctx.screenHeight)/win.scale()
 	switch part {
 	case PART_LEFT, PART_TOP_LEFT, PART_BOTTOM_LEFT:
 		left = max(0, min(left+delta.X, right-MinWindowSize))
@@ -1386,7 +1275,7 @@ func dragWindowResize(win *windowData, part dragType, delta point) bool {
 	return changed
 }
 
-func dragWindowScroll(win *windowData, mpos point, vert bool) {
+func (ctx *Context) dragWindowScroll(win *windowData, mpos point, vert bool) {
 	if win.NoScroll {
 		return
 	}
@@ -1399,7 +1288,7 @@ func dragWindowScroll(win *windowData, mpos point, vert bool) {
 	}
 	if vert && req.Y > avail.Y {
 		barH := scrollbarThumbLength(avail.Y, req.Y, win.scale())
-		slack := 4 * UIScale()
+		slack := 4 * ctx.UIScale()
 		maxScroll := req.Y - avail.Y + slack
 		track := win.getPosition().Y + win.GetTitleSize() + win.BorderPad*win.scale()
 		pos := mpos.Y - (track + barH/2)
@@ -1419,7 +1308,7 @@ func dragWindowScroll(win *windowData, mpos point, vert bool) {
 	}
 	if !vert && req.X > avail.X {
 		barW := scrollbarThumbLength(avail.X, req.X, win.scale())
-		slack := 4 * UIScale()
+		slack := 4 * ctx.UIScale()
 		maxScroll := req.X - avail.X + slack
 		track := win.getPosition().X + win.BorderPad*win.scale()
 		pos := mpos.X - (track + barW/2)
@@ -1442,16 +1331,16 @@ func dragWindowScroll(win *windowData, mpos point, vert bool) {
 	}
 }
 
-func dragFlowScroll(flow *itemData, mpos point, vert bool) {
+func (ctx *Context) dragFlowScroll(flow *itemData, mpos point, vert bool) {
 	if !flow.Scrollable {
 		return
 	}
 	old := flow.Scroll
 	req := flow.contentBounds()
 	size := flow.GetSize()
-	if vert && flow.FlowType == FLOW_VERTICAL && req.Y > size.Y {
-		barH := scrollbarThumbLength(size.Y, req.Y, UIScale())
-		slack := 4 * UIScale()
+	if vert && flow.verticalFlow() && req.Y > size.Y {
+		barH := scrollbarThumbLength(size.Y, req.Y, ctx.UIScale())
+		slack := 4 * ctx.UIScale()
 		maxScroll := req.Y - size.Y + slack
 		track := flow.DrawRect.Y0
 		pos := mpos.Y - (track + barH/2)
@@ -1469,9 +1358,9 @@ func dragFlowScroll(flow *itemData, mpos point, vert bool) {
 	} else if vert {
 		flow.Scroll.Y = 0
 	}
-	if !vert && flow.FlowType == FLOW_HORIZONTAL && req.X > size.X {
-		barW := scrollbarThumbLength(size.X, req.X, UIScale())
-		slack := 4 * UIScale()
+	if !vert && flow.horizontalFlow() && req.X > size.X {
+		barW := scrollbarThumbLength(size.X, req.X, ctx.UIScale())
+		slack := 4 * ctx.UIScale()
 		maxScroll := req.X - size.X + slack
 		track := flow.DrawRect.X0
 		pos := mpos.X - (track + barW/2)
@@ -1493,62 +1382,46 @@ func dragFlowScroll(flow *itemData, mpos point, vert bool) {
 		flow.ParentWindow.markDirty()
 	}
 }
-func dropdownOpenContains(items []*itemData, mpos point) bool {
+func (ctx *Context) dropdownOpenContains(items []*itemData, mpos point) bool {
 	for _, it := range items {
 		if it.Invisible {
 			continue
 		}
 		if it.ItemType == ITEM_DROPDOWN && it.Open {
-			r, _ := dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
+			r, _ := ctx.dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
 			if r.containsPoint(mpos) {
 				return true
 			}
 		}
-		if len(it.Tabs) > 0 {
-			if it.ActiveTab >= len(it.Tabs) {
-				it.ActiveTab = 0
-			}
-			if dropdownOpenContains(it.Tabs[it.ActiveTab].Contents, mpos) {
-				return true
-			}
-		}
-		if dropdownOpenContains(it.Contents, mpos) {
+		if ctx.dropdownOpenContains(it.activeContents(), mpos) {
 			return true
 		}
 	}
 	return false
 }
 
-func clickOpenDropdown(items []*itemData, mpos point, click bool) bool {
+func (ctx *Context) clickOpenDropdown(items []*itemData, mpos point, click bool) bool {
 	for _, it := range items {
 		if it.Invisible {
 			continue
 		}
 		if it.ItemType == ITEM_DROPDOWN && it.Open {
-			r, _ := dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
+			r, _ := ctx.dropdownOpenRect(it, point{X: it.DrawRect.X0, Y: it.DrawRect.Y0})
 			if r.containsPoint(mpos) {
 				it.clickItem(mpos, click)
 				return true
 			}
 		}
-		if len(it.Tabs) > 0 {
-			if it.ActiveTab >= len(it.Tabs) {
-				it.ActiveTab = 0
-			}
-			if clickOpenDropdown(it.Tabs[it.ActiveTab].Contents, mpos, click) {
-				return true
-			}
-		}
-		if clickOpenDropdown(it.Contents, mpos, click) {
+		if ctx.clickOpenDropdown(it.activeContents(), mpos, click) {
 			return true
 		}
 	}
 	return false
 }
 
-func dropdownOpenContainsAnywhere(mpos point) bool {
-	for _, win := range windows {
-		if win.Open && dropdownOpenContains(win.Contents, mpos) {
+func (ctx *Context) dropdownOpenContainsAnywhere(mpos point) bool {
+	for _, win := range ctx.windows {
+		if win.Open && ctx.dropdownOpenContains(win.Contents, mpos) {
 			return true
 		}
 	}
@@ -1575,6 +1448,7 @@ func closeDropdowns(items []*itemData) {
 		if it.ItemType == ITEM_DROPDOWN {
 			if it.Open {
 				it.Open = false
+				it.keyboardMenu = false
 				it.clearDropdownHover()
 				it.markDirty()
 			}
@@ -1586,33 +1460,10 @@ func closeDropdowns(items []*itemData) {
 	}
 }
 
-func closeAllDropdowns() {
-	for _, win := range windows {
+func (ctx *Context) closeAllDropdowns() {
+	for _, win := range ctx.windows {
 		if win.Open {
 			closeDropdowns(win.Contents)
-		}
-	}
-}
-
-func collectInputs(items []*itemData, inputs *[]*itemData) {
-	for _, it := range items {
-		if it.Invisible {
-			continue
-		}
-		if itemHandlesTextEditing(it) {
-			*inputs = append(*inputs, it)
-		}
-		if it.ItemType == ITEM_FLOW {
-			if len(it.Tabs) > 0 {
-				if it.ActiveTab >= len(it.Tabs) {
-					it.ActiveTab = 0
-				}
-				collectInputs(it.Tabs[it.ActiveTab].Contents, inputs)
-			} else {
-				collectInputs(it.Contents, inputs)
-			}
-		} else {
-			collectInputs(it.Contents, inputs)
 		}
 	}
 }
@@ -1620,17 +1471,21 @@ func collectInputs(items []*itemData, inputs *[]*itemData) {
 // ---- Context menu helpers (overlay, screen-space) ----
 
 // handleContextMenus processes hover and clicks for active context menus. Returns true if handled.
-func handleContextMenus(mpos point, click bool) bool {
+func (ctx *Context) handleContextMenus(mpos point, click bool) bool {
 	handled := false
-	for _, cm := range contextMenus {
+	for _, cm := range ctx.contextMenus {
 		if cm == nil || !cm.Open {
 			continue
 		}
+		if cm.keyboardMenu && !click {
+			handled = true
+			continue
+		}
 		// Compute the open rectangle at the stored origin.
-		r, _ := dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
+		r, _ := ctx.dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
 		if r.containsPoint(mpos) {
 			handled = true
-			optionH := dropdownOptionHeight(cm)
+			optionH := ctx.dropdownOptionHeight(cm)
 			startY := r.Y0
 			idx := int((mpos.Y - startY + cm.Scroll.Y) / optionH)
 			if idx >= 0 && idx < len(cm.Options) {
@@ -1647,14 +1502,8 @@ func handleContextMenus(mpos point, click bool) bool {
 					return true
 				}
 				if click {
-					cm.Selected = idx
-					cm.Open = false
-					// Close the selected menu before invoking its callback so the
-					// callback can open a follow-up menu without it being discarded.
-					CloseContextMenus()
-					if cm.OnSelect != nil {
-						cm.OnSelect(idx)
-					}
+					ctx.selectDropdownOption(cm, idx)
+					return true
 				} else {
 					if idx != cm.HoverIndex {
 						cm.HoverIndex = idx
@@ -1679,12 +1528,12 @@ func handleContextMenus(mpos point, click bool) bool {
 	return handled
 }
 
-func contextMenuContainsAnywhere(mpos point) bool {
-	for _, cm := range contextMenus {
+func (ctx *Context) contextMenuContainsAnywhere(mpos point) bool {
+	for _, cm := range ctx.contextMenus {
 		if cm == nil || !cm.Open {
 			continue
 		}
-		r, _ := dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
+		r, _ := ctx.dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
 		if r.containsPoint(mpos) {
 			return true
 		}
@@ -1692,13 +1541,13 @@ func contextMenuContainsAnywhere(mpos point) bool {
 	return false
 }
 
-func scrollContextMenus(mpos point, delta point) bool {
-	for _, cm := range contextMenus {
+func (ctx *Context) scrollContextMenus(mpos point, delta point) bool {
+	for _, cm := range ctx.contextMenus {
 		if cm == nil || !cm.Open {
 			continue
 		}
-		optionH := dropdownOptionHeight(cm)
-		r, _ := dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
+		optionH := ctx.dropdownOptionHeight(cm)
+		r, _ := ctx.dropdownOpenRect(cm, point{X: cm.DrawRect.X0, Y: cm.DrawRect.Y0})
 		openH := r.Y1 - r.Y0
 		if r.containsPoint(mpos) {
 			maxScroll := optionH*float32(len(cm.Options)) - openH
@@ -1723,6 +1572,8 @@ func scrollContextMenus(mpos point, delta point) bool {
 }
 
 // SearchActive reports whether a window search box currently has focus.
-func SearchActive() bool {
-	return activeSearch != nil
+func (ctx *Context) SearchActive() bool {
+	ctx.mustAlive()
+
+	return ctx.activeSearch != nil
 }

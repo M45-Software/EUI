@@ -23,7 +23,9 @@ func TestTooltipColorsRemainHighContrast(t *testing.T) {
 }
 
 func TestTooltipTextIsTruncatedAndWrapped(t *testing.T) {
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatalf("font source: %v", err)
 	}
 	raw := strings.Repeat("tooltip words ", 30)
@@ -35,7 +37,7 @@ func TestTooltipTextIsTruncatedAndWrapped(t *testing.T) {
 		t.Fatalf("truncated tooltip = %q", short)
 	}
 
-	face := textFace(12)
+	face := ctx.textFace(12)
 	wrapped := wrapTooltip(short, face, tooltipMaxWidth)
 	if !strings.Contains(wrapped, "\n") {
 		t.Fatalf("tooltip was not wrapped: %q", wrapped)
@@ -46,7 +48,7 @@ func TestTooltipTextIsTruncatedAndWrapped(t *testing.T) {
 		}
 	}
 
-	spacing := tooltipLineSpacing(face)
+	spacing := ctx.tooltipLineSpacing(face)
 	_, multiHeight := text.Measure(wrapped, face, spacing)
 	_, singleHeight := text.Measure(strings.Split(wrapped, "\n")[0], face, spacing)
 	if multiHeight <= singleHeight {
@@ -65,23 +67,27 @@ func TestTooltipAllowsDetailedDescriptions(t *testing.T) {
 }
 
 func TestTooltipWrapWidthFitsScreen(t *testing.T) {
-	originalWidth := screenWidth
-	originalScale := uiScale
+	ctx := newTestContext(t)
+
+	originalWidth := ctx.screenWidth
+	originalScale := ctx.uiScale
 	t.Cleanup(func() {
-		screenWidth = originalWidth
-		uiScale = originalScale
+		ctx.screenWidth = originalWidth
+		ctx.uiScale = originalScale
 	})
 
-	screenWidth = 240
-	uiScale = 1
-	want := float64(screenWidth - 2*tooltipPadding)
-	if got := tooltipWrapWidth(); got != want {
+	ctx.screenWidth = 240
+	ctx.uiScale = 1
+	want := float64(ctx.screenWidth - 2*tooltipPadding)
+	if got := ctx.tooltipWrapWidth(); got != want {
 		t.Fatalf("tooltip wrap width = %v, want %v", got, want)
 	}
 }
 
 func TestTooltipHiddenWhileMenuIsOpen(t *testing.T) {
-	tooltip := &itemData{Tooltip: "details"}
+	ctx := newTestContext(t)
+
+	tooltip := &itemData{ctx: ctx, Tooltip: "details"}
 
 	if !shouldDrawTooltip(tooltip, nil, nil) {
 		t.Fatal("tooltip should draw when no menu is open")
@@ -89,10 +95,10 @@ func TestTooltipHiddenWhileMenuIsOpen(t *testing.T) {
 	if shouldDrawTooltip(tooltip, []openDropdown{{}}, nil) {
 		t.Fatal("tooltip should be hidden while a dropdown is open")
 	}
-	if shouldDrawTooltip(tooltip, nil, []*itemData{{Open: true}}) {
+	if shouldDrawTooltip(tooltip, nil, []*itemData{{ctx: ctx, Open: true}}) {
 		t.Fatal("tooltip should be hidden while a context menu is open")
 	}
-	if !shouldDrawTooltip(tooltip, nil, []*itemData{{Open: false}}) {
+	if !shouldDrawTooltip(tooltip, nil, []*itemData{{ctx: ctx, Open: false}}) {
 		t.Fatal("a closed context menu should not hide the tooltip")
 	}
 }

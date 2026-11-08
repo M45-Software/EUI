@@ -8,31 +8,48 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-// Windows returns the list of active windows.
-func Windows() []*WindowData { return windows }
+// Windows returns a snapshot of this context's window list.
+func (ctx *Context) Windows() []*WindowData {
+	ctx.mustAlive()
+	return append([]*WindowData(nil), ctx.windows...)
+}
 
 // PointerPressWindow returns the window under the current pointer press. It
 // remains available for the duration of the press even if that window closes.
-func PointerPressWindow() *WindowData { return downWin }
+func (ctx *Context) PointerPressWindow() *WindowData {
+	ctx.mustAlive()
+	return ctx.downWin
+}
 
 // PointerPressHandled reports whether EUI handled the pointer press this frame.
-func PointerPressHandled() bool { return pointerPressHandled }
+func (ctx *Context) PointerPressHandled() bool {
+	ctx.mustAlive()
+	return ctx.pointerPressHandled
+}
 
 // PointerCursorClaimed reports whether EUI selected a non-default cursor for
 // the current frame. Callers that also manage the system cursor should not
 // overwrite it while this is true.
-func PointerCursorClaimed() bool { return cursorShape != ebiten.CursorShapeDefault }
+func (ctx *Context) PointerCursorClaimed() bool {
+	ctx.mustAlive()
+	return ctx.cursorShape != ebiten.CursorShapeDefault
+}
 
 // WindowSnapping reports whether window snapping is enabled.
-func WindowSnapping() bool { return windowSnapping }
+func (ctx *Context) WindowSnapping() bool {
+	ctx.mustAlive()
+	return ctx.windowSnapping
+}
 
 // SetWindowSnapping enables or disables window snapping.
-func SetWindowSnapping(enabled bool) {
-	windowSnapping = enabled
+func (ctx *Context) SetWindowSnapping(enabled bool) {
+	ctx.mustAlive()
+
+	ctx.windowSnapping = enabled
 	if enabled {
 		return
 	}
-	for _, win := range windows {
+	for _, win := range ctx.windows {
 		win.snapAnchorActive = false
 		win.snapAnchorX = false
 		win.snapAnchorY = false
@@ -42,36 +59,54 @@ func SetWindowSnapping(enabled bool) {
 }
 
 // MiddleClickMove reports whether middle-click window dragging is enabled.
-func MiddleClickMove() bool { return middleClickMove }
+func (ctx *Context) MiddleClickMove() bool {
+	ctx.mustAlive()
+	return ctx.middleClickMove
+}
 
 // SetMiddleClickMove enables or disables dragging windows with the middle mouse button.
-func SetMiddleClickMove(enabled bool) { middleClickMove = enabled }
+func (ctx *Context) SetMiddleClickMove(enabled bool) {
+	ctx.mustAlive()
+	ctx.middleClickMove = enabled
+}
 
 // SetKeyboardInputCaptured pauses EUI keyboard actions while leaving pointer
 // and window controls active.
-func SetKeyboardInputCaptured(captured bool) { keyboardInputCaptured = captured }
+func (ctx *Context) SetKeyboardInputCaptured(captured bool) {
+	ctx.mustAlive()
+
+	if captured {
+		if ctx.composingItem != nil {
+			ctx.composingItem.CancelComposition()
+		}
+		ctx.cancelNativeTextInput(nil)
+	}
+	ctx.keyboardInputCaptured = captured
+}
 
 // SetScreenSize sets the current screen size used for layout calculations.
-func SetScreenSize(w, h int) {
-	screenWidth = w
-	screenHeight = h
+func (ctx *Context) SetScreenSize(w, h int) {
+	ctx.mustAlive()
+
+	ctx.screenWidth = w
+	ctx.screenHeight = h
 	needDirty := false
-	for _, win := range windows {
+	for _, win := range ctx.windows {
 		size := win.GetSize()
 		resized := false
-		if size.X > float32(screenWidth) {
+		if size.X > float32(ctx.screenWidth) {
 			if win.NoScale {
-				win.Size.X = float32(screenWidth)
+				win.Size.X = float32(ctx.screenWidth)
 			} else {
-				win.Size.X = float32(screenWidth) / uiScale
+				win.Size.X = float32(ctx.screenWidth) / ctx.uiScale
 			}
 			resized = true
 		}
-		if size.Y > float32(screenHeight) {
+		if size.Y > float32(ctx.screenHeight) {
 			if win.NoScale {
-				win.Size.Y = float32(screenHeight)
+				win.Size.Y = float32(ctx.screenHeight)
 			} else {
-				win.Size.Y = float32(screenHeight) / uiScale
+				win.Size.Y = float32(ctx.screenHeight) / ctx.uiScale
 			}
 			resized = true
 		}
@@ -92,59 +127,76 @@ func SetScreenSize(w, h int) {
 		}
 		win.clampToScreen()
 	}
-	updateAllTooltipBounds()
+	ctx.updateAllTooltipBounds()
 	if needDirty {
-		markAllDirty()
+		ctx.markAllDirty()
 	}
 
 }
 
 // ScreenSize returns the current screen size.
-func ScreenSize() (int, int) { return screenWidth, screenHeight }
+func (ctx *Context) ScreenSize() (int, int) {
+	ctx.mustAlive()
+	return ctx.screenWidth, ctx.screenHeight
+}
 
 // SetFontSource sets the text face source used when rendering text.
-func SetFontSource(src *text.GoTextFaceSource) {
-	mplusFaceSource = src
-	faceCache = map[float64]*text.GoTextFace{}
+func (ctx *Context) SetFontSource(src *text.GoTextFaceSource) {
+	ctx.mustAlive()
+
+	ctx.mplusFaceSource = src
+	ctx.faceCache = map[float64]*text.GoTextFace{}
 }
 
 // SetBoldFontSource sets the bold text face source used when rendering bold text.
-func SetBoldFontSource(src *text.GoTextFaceSource) {
-	mplusBoldFaceSource = src
-	boldFaceCache = map[float64]*text.GoTextFace{}
+func (ctx *Context) SetBoldFontSource(src *text.GoTextFaceSource) {
+	ctx.mustAlive()
+
+	ctx.mplusBoldFaceSource = src
+	ctx.boldFaceCache = map[float64]*text.GoTextFace{}
 }
 
 // FontSource returns the current text face source.
-func FontSource() *text.GoTextFaceSource { return mplusFaceSource }
+func (ctx *Context) FontSource() *text.GoTextFaceSource {
+	ctx.mustAlive()
+	return ctx.mplusFaceSource
+}
 
 // BoldFontSource returns the current bold text face source.
-func BoldFontSource() *text.GoTextFaceSource { return mplusBoldFaceSource }
+func (ctx *Context) BoldFontSource() *text.GoTextFaceSource {
+	ctx.mustAlive()
+	return ctx.mplusBoldFaceSource
+}
 
 // EnsureFontSource initializes the font source from ttf data if needed.
-func EnsureFontSource(ttf []byte) error {
-	if mplusFaceSource != nil {
+func (ctx *Context) EnsureFontSource(ttf []byte) error {
+	ctx.mustAlive()
+
+	if ctx.mplusFaceSource != nil {
 		return nil
 	}
 	s, err := text.NewGoTextFaceSource(bytes.NewReader(ttf))
 	if err != nil {
 		return err
 	}
-	mplusFaceSource = s
-	faceCache = map[float64]*text.GoTextFace{}
+	ctx.mplusFaceSource = s
+	ctx.faceCache = map[float64]*text.GoTextFace{}
 	return nil
 }
 
 // EnsureBoldFontSource initializes the bold font source from ttf data if needed.
-func EnsureBoldFontSource(ttf []byte) error {
-	if mplusBoldFaceSource != nil {
+func (ctx *Context) EnsureBoldFontSource(ttf []byte) error {
+	ctx.mustAlive()
+
+	if ctx.mplusBoldFaceSource != nil {
 		return nil
 	}
 	s, err := text.NewGoTextFaceSource(bytes.NewReader(ttf))
 	if err != nil {
 		return err
 	}
-	mplusBoldFaceSource = s
-	boldFaceCache = map[float64]*text.GoTextFace{}
+	ctx.mplusBoldFaceSource = s
+	ctx.boldFaceCache = map[float64]*text.GoTextFace{}
 	return nil
 }
 
@@ -168,7 +220,7 @@ func (win *WindowData) PrependItem(child *ItemData) { win.prependItemTo(child) }
 // RemoveItem removes a child item from the parent item.
 func (parent *ItemData) RemoveItem(child *ItemData) { parent.removeItem(child) }
 
-// SetItems replaces a parent's children and recalculates its flow once.
+// SetItems replaces a parent's children in one batch and invalidates layout.
 func (parent *ItemData) SetItems(children []*ItemData) { parent.setItems(children) }
 
 // RemoveItem removes a child item from the window.
@@ -186,7 +238,10 @@ func (parent *ItemData) ReplaceItem(idx int, child *ItemData) { parent.replaceIt
 // ReplaceItem replaces the child item at the provided index in the window.
 func (win *WindowData) ReplaceItem(idx int, child *ItemData) { win.replaceItem(idx, child) }
 
-// UpdateText updates the text content and marks the item dirty when it changes.
+// UpdateText silently updates text and reflows layout as needed. For inputs it
+// replaces the logical value (including masked passwords), synchronizes TextPtr,
+// resets undo history, and clamps caret/selection. ReplaceText is an undoable
+// editing command and emits EventInputChanged instead.
 func (item *ItemData) UpdateText(text string) { item.updateText(text) }
 
 // SetProgressIndeterminate updates the indeterminate state of a progress bar
@@ -206,65 +261,92 @@ func SetProgressIndeterminate(pb *ItemData, ind bool) {
 }
 
 // ListThemes returns the available palette names.
-func ListThemes() ([]string, error) { return listThemes() }
+func (ctx *Context) ListThemes() ([]string, error) {
+	ctx.mustAlive()
+	return ctx.listThemes()
+}
 
 // ListStyles returns the available style theme names.
-func ListStyles() ([]string, error) { return listStyles() }
+func (ctx *Context) ListStyles() ([]string, error) {
+	ctx.mustAlive()
+	return ctx.listStyles()
+}
 
 // SetUserDataRoot places editable themes and generated theme documentation
 // under the application's persistent user data directory.
-func SetUserDataRoot(root string) {
+func (ctx *Context) SetUserDataRoot(root string) {
+	ctx.mustAlive()
+
 	if root == "" {
-		themeDirectory = "themes"
+		ctx.themeDirectory = "themes"
 	} else {
-		themeDirectory = filepath.Join(root, "themes")
+		ctx.themeDirectory = filepath.Join(root, "themes")
 	}
-	updateThemePath()
-	updateStylePath()
-	ensureThemeDocs()
-	refreshThemeMod()
-	refreshStyleMod()
+	ctx.updateThemePath()
+	ctx.updateStylePath()
+	ctx.ensureThemeDocs()
+	ctx.refreshThemeMod()
+	ctx.refreshStyleMod()
 }
 
 // CurrentThemeName returns the active theme name.
-func CurrentThemeName() string { return currentThemeName }
+func (ctx *Context) CurrentThemeName() string {
+	ctx.mustAlive()
+	return ctx.currentThemeName
+}
 
 // SetCurrentThemeName updates the active theme name.
-func SetCurrentThemeName(name string) {
-	currentThemeName = name
-	updateThemePath()
+func (ctx *Context) SetCurrentThemeName(name string) {
+	ctx.mustAlive()
+
+	ctx.currentThemeName = name
+	ctx.updateThemePath()
 }
 
 // CurrentStyleName returns the active style theme name.
-func CurrentStyleName() string { return currentStyleName }
+func (ctx *Context) CurrentStyleName() string {
+	ctx.mustAlive()
+	return ctx.currentStyleName
+}
 
 // SetCurrentStyleName updates the active style theme name.
-func SetCurrentStyleName(name string) {
-	currentStyleName = name
-	updateStylePath()
+func (ctx *Context) SetCurrentStyleName(name string) {
+	ctx.mustAlive()
+
+	ctx.currentStyleName = name
+	ctx.updateStylePath()
 }
 
 // AccentSaturation returns the current accent color saturation value.
-func AccentSaturation() float64 { return accentSaturation }
+func (ctx *Context) AccentSaturation() float64 {
+	ctx.mustAlive()
+	return ctx.accentSaturation
+}
 
 // AccentColor returns the current accent color.
-func AccentColor() Color {
-	return Color(hsvaToRGBA(accentHue, accentSaturation, accentValue, accentAlpha))
+func (ctx *Context) AccentColor() Color {
+	ctx.mustAlive()
+
+	return Color(hsvaToRGBA(ctx.accentHue, ctx.accentSaturation, ctx.accentValue, ctx.accentAlpha))
 }
 
 // TextColor returns the active theme's normal text color.
-func TextColor() Color {
-	if currentTheme != nil {
-		return currentTheme.Text.TextColor
+func (ctx *Context) TextColor() Color {
+	ctx.mustAlive()
+
+	if ctx.currentTheme != nil {
+		return ctx.currentTheme.Text.TextColor
 	}
 	return baseTheme.Text.TextColor
 }
 
 // IsLightTheme reports whether the active theme uses a light window background.
-func IsLightTheme() bool {
+func (ctx *Context) IsLightTheme() bool {
+	ctx.mustAlive()
+
 	bg := baseTheme.Window.BGColor
-	if currentTheme != nil {
-		bg = currentTheme.Window.BGColor
+	if ctx.currentTheme != nil {
+		bg = ctx.currentTheme.Window.BGColor
 	}
 	// ITU-R BT.601 luma is sufficient here and avoids classifying saturated
 	// backgrounds by their unweighted channel sum.
@@ -274,10 +356,12 @@ func IsLightTheme() bool {
 
 // SubtleAlternateRowColor returns a low-contrast opaque row color derived
 // from the active window background.
-func SubtleAlternateRowColor() Color {
+func (ctx *Context) SubtleAlternateRowColor() Color {
+	ctx.mustAlive()
+
 	bg := Color{R: 48, G: 48, B: 48, A: 255}
-	if currentTheme != nil {
-		bg = currentTheme.Window.BGColor
+	if ctx.currentTheme != nil {
+		bg = ctx.currentTheme.Window.BGColor
 	}
 	target := 255
 	if int(bg.R)+int(bg.G)+int(bg.B) >= 384 {
@@ -290,78 +374,78 @@ func SubtleAlternateRowColor() Color {
 }
 
 // HasTextSelection reports whether Copy is handled by a selected UI text range.
-func HasTextSelection() bool {
-	return selectedTextItem != nil && selectedTextItem.SelectedText() != ""
+func (ctx *Context) HasTextSelection() bool {
+	ctx.mustAlive()
+
+	return ctx.selectedTextItem != nil && ctx.selectedTextItem.SelectedText() != ""
 }
 
 // FocusedTextInput returns the visible, enabled text control with keyboard
 // focus, or nil. Hosts can use this to reserve editing keys from game hotkeys.
-func FocusedTextInput() *ItemData {
-	if !itemAcceptsTextEditing(focusedItem) || focusedItem.isInvisible() ||
-		focusedItem.ParentWindow != nil && !focusedItem.ParentWindow.Open {
+func (ctx *Context) FocusedTextInput() *ItemData {
+	ctx.mustAlive()
+
+	it := ctx.FocusedItem()
+	if !itemAcceptsTextEditing(it) {
 		return nil
 	}
-	return focusedItem
+	return it
 }
 
 // OpenSearch shows and focuses this window's titlebar search box.
 func (win *windowData) OpenSearch() {
+	ctx := win.ui()
+
 	if win == nil || !win.Open || !win.Searchable {
 		return
 	}
-	if focusedItem != nil {
-		ClearFocus(focusedItem)
+	if ctx.focusedItem != nil {
+		ctx.ClearFocus(ctx.focusedItem)
 	}
 	win.searchOpen = true
-	activeSearch = win
+	ctx.activeSearch = win
+	win.ensureSearchInput()
 	win.markDirty()
 }
 
 // ClearFocus removes focus from the provided item if it is currently focused.
-func ClearFocus(it *ItemData) {
-	if it != nil && focusedItem == it {
-		focusedItem.Focused = false
-		focusedItem.markDirty()
-		focusedItem = nil
+func (ctx *Context) ClearFocus(it *ItemData) {
+	ctx.mustAlive()
+	ctx.requireItem(it)
+
+	if it != nil && ctx.focusedItem == it {
+		it.CancelComposition()
+		it.Focused = false
+		ctx.focusedItem = nil
+		invalidateFocus(it)
+		ctx.finishKeyboardSlider()
 	}
 }
 
-// Focus gives keyboard focus to a text input. It is useful for transient
-// keyboard-driven windows that should be ready for typing as soon as opened.
-func Focus(it *ItemData) {
-	if it == nil || it.isInvisible() || !itemAcceptsTextEditing(it) {
+// Focus gives keyboard focus to a control and reveals it in scrolling ancestors.
+// Tab strips are focused through their owning flow. Text inputs place the caret
+// at the end; multiline editor Tab/indent behavior is preserved.
+func (ctx *Context) Focus(it *ItemData) {
+	ctx.mustAlive()
+	ctx.requireItem(it)
+
+	if !ctx.focusControl(it, true) {
 		return
 	}
-	if focusedItem != nil && focusedItem != it {
-		focusedItem.Focused = false
-		focusedItem.markDirty()
+	if it.ParentWindow != nil && ctx.activeWindow != it.ParentWindow {
+		it.ParentWindow.BringForward()
 	}
-	focusedItem = it
-	activeSearch = nil
-	it.Focused = true
 	if itemHandlesTextEditing(it) {
 		it.editor().group = ""
 		it.editMove(len([]rune(it.editText())), false)
-	} else {
+	} else if itemAcceptsTextEditing(it) {
 		it.CursorPos = len([]rune(it.Text))
-		it.markDirty()
 	}
 }
 
-// SetActiveSearchForTest sets the active search window for tests.
-// This helper mirrors logic used internally when a window's search box
-// is activated. It exists so external tests can simulate an active
-// search without poking unexported symbols.
-func SetActiveSearchForTest(win *WindowData) {
-	activeSearch = win
-	if win != nil {
-		win.searchOpen = true
-	}
-}
-
-// ScrollbarWidth returns the pixel width used when rendering scrollbars
-// so callers can reserve space and avoid overlap.
-func ScrollbarWidth() float32 {
-	// Matches the value used in draw routines.
-	return currentStyle.BorderPad.Slider * 2
+// ScrollbarWidth returns the pixel width used when rendering scrollbars so
+// callers can reserve space and avoid overlap.
+func (ctx *Context) ScrollbarWidth() float32 {
+	ctx.mustAlive()
+	return ctx.currentStyle.BorderPad.Slider * 2
 }

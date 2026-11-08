@@ -3,7 +3,9 @@ package eui
 import "testing"
 
 func TestExternalTextEditingRetainsPointerEditingWithoutKeyboardMutation(t *testing.T) {
-	item, _ := NewText()
+	ctx := newTestContext(t)
+
+	item, _ := ctx.NewText()
 	item.EditableText = true
 	item.ExternalTextEditing = true
 	if !itemAcceptsTextEditing(item) {

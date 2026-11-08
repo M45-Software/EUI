@@ -7,7 +7,9 @@ import (
 )
 
 // DumpTree writes the window and overlay hierarchy to debug/tree.json.
-func DumpTree() error {
+func (ctx *Context) DumpTree() error {
+	ctx.mustAlive()
+
 	if err := os.MkdirAll("debug", 0755); err != nil {
 		return err
 	}
@@ -15,7 +17,7 @@ func DumpTree() error {
 		Windows  []treeWindow `json:"windows"`
 		Overlays []treeItem   `json:"overlays"`
 	}{}
-	for _, w := range windows {
+	for _, w := range ctx.windows {
 		tw := treeWindow{
 			Title:    w.Title,
 			Position: w.Position,

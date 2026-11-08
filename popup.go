@@ -18,8 +18,10 @@ type PopupButton struct {
 // ShowPopup opens a floating dialog with extra items, a message, and buttons.
 // It does not block input to other windows. Button actions run before close;
 // closing removes the temporary window. Call Init or supply a font first.
-func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
-	win := NewWindow()
+func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
+	ctx.mustAlive()
+
+	win := ctx.NewWindow()
 	win.Title = title
 	win.OnClose = win.RemoveWindow
 	win.Closable = false
@@ -32,7 +34,7 @@ func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData
 	win.Padding = 8
 	win.BorderPad = 4
 
-	flow := NewColumn()
+	flow := ctx.NewColumn()
 	// Optional extra items (e.g., images) shown above the message
 	for _, ex := range extras {
 		if ex != nil {
@@ -41,7 +43,7 @@ func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData
 	}
 	if message != "" {
 		// Message (wrapped to a reasonable width)
-		uiScale := UIScale()
+		uiScale := ctx.UIScale()
 		targetWidthPx := float64(520)
 		// Add horizontal padding on both sides to avoid right-edge clipping.
 		hpadPx := float64(24)
@@ -50,7 +52,7 @@ func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData
 		// Match renderer size: (FontSize*uiScale)+2
 		facePx := float64(12*uiScale + 2)
 		var face text.Face
-		if src := FontSource(); src != nil {
+		if src := ctx.FontSource(); src != nil {
 			face = &text.GoTextFace{Source: src, Size: facePx}
 		} else {
 			face = &text.GoTextFace{Size: facePx}
@@ -71,7 +73,7 @@ func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData
 		if heightUnits < 24 {
 			heightUnits = 24
 		}
-		txt, _ := NewText()
+		txt, _ := ctx.NewText()
 		txt.Text = wrapped
 		txt.FontSize = 12
 		txt.SelectableText = true
@@ -83,9 +85,9 @@ func ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData
 	}
 
 	// Buttons row
-	btnRow := NewRow()
+	btnRow := ctx.NewRow()
 	for _, b := range buttons {
-		btn, ev := NewButton()
+		btn, ev := ctx.NewButton()
 		btn.Text = b.Text
 		btn.Size = Point{X: 120, Y: 24}
 		if b.Width > 0 {

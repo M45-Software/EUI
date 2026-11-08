@@ -3,14 +3,16 @@ package eui
 import "testing"
 
 func TestScrollbarHitRegions(t *testing.T) {
-	previousScale := UIScale()
-	t.Cleanup(func() { SetUIScale(previousScale) })
+	ctx := newTestContext(t)
+
+	previousScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(previousScale) })
 	for _, scale := range []float32{1, 1.5, 2} {
-		SetUIScale(scale)
-		win := NewWindow()
+		ctx.SetUIScale(scale)
+		win := ctx.NewWindow()
 		win.Padding, win.BorderPad, win.TitleHeight = 0, 0, 0
 		win.Position, win.Size = point{30, 40}, point{300, 200}
-		win.Contents = []*itemData{{ItemType: ITEM_FLOW, Fixed: true, Size: point{600, 600}}}
+		win.Contents = []*itemData{{ctx: ctx, ItemType: ITEM_FLOW, Fixed: true, Size: point{600, 600}}}
 		pos, size := win.getPosition(), win.GetSize()
 		for _, test := range []struct {
 			point point

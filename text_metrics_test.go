@@ -11,16 +11,18 @@ import (
 )
 
 func TestTextSizeTracksTextFontAndScale(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale, oldSource := UIScale(), FontSource()
-	t.Cleanup(func() { SetFontSource(oldSource); SetUIScale(oldScale) })
-	SetUIScale(1)
-	item := NewLabel("Ready")
+	oldScale, oldSource := ctx.UIScale(), ctx.FontSource()
+	t.Cleanup(func() { ctx.SetFontSource(oldSource); ctx.SetUIScale(oldScale) })
+	ctx.SetUIScale(1)
+	item := ctx.NewLabel("Ready")
 	check := func() {
 		t.Helper()
-		face := textFace(item.FontSize*UIScale() + 2)
+		face := ctx.textFace(item.FontSize*ctx.UIScale() + 2)
 		width, _ := text.Measure(item.Text, face, 0)
 		metrics := face.Metrics()
 		want := Point{X: float32(math.Ceil(width)), Y: float32(math.Ceil(metrics.HAscent + metrics.HDescent + 2))}
@@ -36,25 +38,27 @@ func TestTextSizeTracksTextFontAndScale(t *testing.T) {
 	check()
 	item.FontSize = 18
 	check()
-	SetUIScale(1.5)
+	ctx.SetUIScale(1.5)
 	check()
 	source, err := text.NewGoTextFaceSource(bytes.NewReader(gobold.TTF))
 	if err != nil {
 		t.Fatal(err)
 	}
-	SetFontSource(source)
+	ctx.SetFontSource(source)
 	check()
 }
 
 func TestTextSizeKeepsMultilineMinimumAndConstraintBehavior(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := UIScale()
-	t.Cleanup(func() { SetUIScale(oldScale) })
-	SetUIScale(1)
-	item := NewLabel("First\nA wider second line\n")
-	face := textFace(14)
+	oldScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(oldScale) })
+	ctx.SetUIScale(1)
+	item := ctx.NewLabel("First\nA wider second line\n")
+	face := ctx.textFace(14)
 	width, _ := text.Measure("A wider second line", face, 0)
 	metrics := face.Metrics()
 	height := float32(math.Ceil(metrics.HAscent+metrics.HDescent+2)) * 3
@@ -81,13 +85,15 @@ func TestTextSizeKeepsMultilineMinimumAndConstraintBehavior(t *testing.T) {
 }
 
 func TestTextSizeMeasuresMutableCustomFaces(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := UIScale()
-	t.Cleanup(func() { SetUIScale(oldScale) })
-	SetUIScale(1)
-	item := NewLabel("Office AVATAR")
+	oldScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(oldScale) })
+	ctx.SetUIScale(1)
+	item := ctx.NewLabel("Office AVATAR")
 	// With an explicit height/width, only the content-growth measurement uses
 	// the custom face. Autosizing retains its ordinary-font minimum dimensions.
 	item.Size = Point{X: 1, Y: 25}
@@ -106,26 +112,28 @@ func TestTextSizeMeasuresMutableCustomFaces(t *testing.T) {
 		}
 	}
 	face.Size = 30 // A mismatched size falls back to the ordinary face.
-	width, _ := text.Measure(item.Text, textFace(14), 0)
+	width, _ := text.Measure(item.Text, ctx.textFace(14), 0)
 	if got := item.GetSize().X; got != float32(math.Ceil(width)) {
 		t.Fatalf("mismatched face width = %g, want %g", got, math.Ceil(width))
 	}
 }
 
 func TestNewTextFaceMutationDoesNotChangeSharedMeasurements(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := UIScale()
-	t.Cleanup(func() { SetUIScale(oldScale) })
-	SetUIScale(1)
-	first, _ := NewText()
-	second, _ := NewText()
+	oldScale := ctx.UIScale()
+	t.Cleanup(func() { ctx.SetUIScale(oldScale) })
+	ctx.SetUIScale(1)
+	first, _ := ctx.NewText()
+	second, _ := ctx.NewText()
 	face := first.Face.(*text.GoTextFace)
-	if face == second.Face || face == textFace(first.FontSize) {
+	if face == second.Face || face == ctx.textFace(first.FontSize) {
 		t.Fatal("text constructor exposed a shared mutable face")
 	}
-	label := NewLabel("Office AVATAR")
+	label := ctx.NewLabel("Office AVATAR")
 	label.FontSize = first.FontSize - 2 // Measure at the exposed face's size.
 	want := label.GetSize()
 	source, err := text.NewGoTextFaceSource(bytes.NewReader(gobold.TTF))

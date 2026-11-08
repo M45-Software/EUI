@@ -27,28 +27,24 @@ type TileDivider struct {
 	OnDrag      func(position float32)
 }
 
-var (
-	tileDividers       []TileDivider
-	hoveredTileDivider = -1
-	activeTileDivider  = -1
-)
-
 // SetTileDividers replaces the active workspace gutters. Passing nil removes
 // them. Dividers are copied so callers can reuse their input slice.
-func SetTileDividers(dividers []TileDivider) {
-	tileDividers = append(tileDividers[:0], dividers...)
-	if activeTileDivider >= len(tileDividers) {
-		activeTileDivider = -1
+func (ctx *Context) SetTileDividers(dividers []TileDivider) {
+	ctx.mustAlive()
+
+	ctx.tileDividers = append(ctx.tileDividers[:0], dividers...)
+	if ctx.activeTileDivider >= len(ctx.tileDividers) {
+		ctx.activeTileDivider = -1
 	}
-	if hoveredTileDivider >= len(tileDividers) {
-		hoveredTileDivider = -1
+	if ctx.hoveredTileDivider >= len(ctx.tileDividers) {
+		ctx.hoveredTileDivider = -1
 	}
 }
 
-func tileDividerHit(d TileDivider, p point) bool {
+func (ctx *Context) tileDividerHit(d TileDivider, p point) bool {
 	hit := d.HitSize
 	if hit <= 0 {
-		hit = 12 * UIScale()
+		hit = 12 * ctx.UIScale()
 	}
 	half := hit / 2
 	if d.Orientation == TileDividerVertical {
@@ -57,17 +53,17 @@ func tileDividerHit(d TileDivider, p point) bool {
 	return p.Y >= d.Position-half && p.Y <= d.Position+half && p.X >= d.Start && p.X <= d.End
 }
 
-func tileDividerAt(p point) int {
-	for i := len(tileDividers) - 1; i >= 0; i-- {
-		if tileDividerHit(tileDividers[i], p) {
+func (ctx *Context) tileDividerAt(p point) int {
+	for i := len(ctx.tileDividers) - 1; i >= 0; i-- {
+		if ctx.tileDividerHit(ctx.tileDividers[i], p) {
 			return i
 		}
 	}
 	return -1
 }
 
-func tileDividerCoveredByStandaloneWindow(p point) bool {
-	for _, win := range windows {
+func (ctx *Context) tileDividerCoveredByStandaloneWindow(p point) bool {
+	for _, win := range ctx.windows {
 		if win.Open && !win.Docked && win.containsPointer(p) {
 			return true
 		}
@@ -75,20 +71,20 @@ func tileDividerCoveredByStandaloneWindow(p point) bool {
 	return false
 }
 
-func updateTileDividerInput(p point, click bool) (handled bool, cursor ebiten.CursorShapeType) {
-	if activeTileDivider >= 0 && !pointerPressed() {
-		activeTileDivider = -1
+func (ctx *Context) updateTileDividerInput(p point, click bool) (handled bool, cursor ebiten.CursorShapeType) {
+	if ctx.activeTileDivider >= 0 && !ctx.pointerPressed() {
+		ctx.activeTileDivider = -1
 	}
-	if activeTileDivider < 0 && (tileDividerCoveredByStandaloneWindow(p) || dropdownOpenContainsAnywhere(p) || contextMenuContainsAnywhere(p)) {
-		hoveredTileDivider = -1
+	if ctx.activeTileDivider < 0 && (ctx.tileDividerCoveredByStandaloneWindow(p) || ctx.dropdownOpenContainsAnywhere(p) || ctx.contextMenuContainsAnywhere(p)) {
+		ctx.hoveredTileDivider = -1
 		return false, ebiten.CursorShapeDefault
 	}
-	hoveredTileDivider = tileDividerAt(p)
-	if click && hoveredTileDivider >= 0 {
-		activeTileDivider = hoveredTileDivider
+	ctx.hoveredTileDivider = ctx.tileDividerAt(p)
+	if click && ctx.hoveredTileDivider >= 0 {
+		ctx.activeTileDivider = ctx.hoveredTileDivider
 	}
-	if activeTileDivider >= 0 && activeTileDivider < len(tileDividers) {
-		d := tileDividers[activeTileDivider]
+	if ctx.activeTileDivider >= 0 && ctx.activeTileDivider < len(ctx.tileDividers) {
+		d := ctx.tileDividers[ctx.activeTileDivider]
 		position := p.Y
 		cursor = ebiten.CursorShapeNSResize
 		if d.Orientation == TileDividerVertical {
@@ -100,8 +96,8 @@ func updateTileDividerInput(p point, click bool) (handled bool, cursor ebiten.Cu
 		}
 		return true, cursor
 	}
-	if hoveredTileDivider >= 0 {
-		if tileDividers[hoveredTileDivider].Orientation == TileDividerVertical {
+	if ctx.hoveredTileDivider >= 0 {
+		if ctx.tileDividers[ctx.hoveredTileDivider].Orientation == TileDividerVertical {
 			return false, ebiten.CursorShapeEWResize
 		}
 		return false, ebiten.CursorShapeNSResize
@@ -109,16 +105,16 @@ func updateTileDividerInput(p point, click bool) (handled bool, cursor ebiten.Cu
 	return false, ebiten.CursorShapeDefault
 }
 
-func drawTileDividers(screen *ebiten.Image) {
-	accentWidth := max(float32(1), UIScale())
-	for i, d := range tileDividers {
+func (ctx *Context) drawTileDividers(screen *ebiten.Image) {
+	accentWidth := max(float32(1), ctx.UIScale())
+	for i, d := range ctx.tileDividers {
 		thickness := d.Thickness
 		if thickness <= 0 {
-			thickness = 4 * UIScale()
+			thickness = 4 * ctx.UIScale()
 		}
 		base := color.RGBA{R: 24, G: 27, B: 32, A: 255}
-		accent := AccentColor().ToRGBA()
-		if i != hoveredTileDivider && i != activeTileDivider {
+		accent := ctx.AccentColor().ToRGBA()
+		if i != ctx.hoveredTileDivider && i != ctx.activeTileDivider {
 			accent.A = 150
 		}
 		if d.Orientation == TileDividerVertical {

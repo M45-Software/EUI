@@ -7,20 +7,22 @@ import (
 )
 
 func TestSetUserDataRootMovesEditableThemes(t *testing.T) {
-	originalDirectory := themeDirectory
+	ctx := newTestContext(t)
+
+	originalDirectory := ctx.themeDirectory
 	t.Cleanup(func() {
-		themeDirectory = originalDirectory
-		updateThemePath()
-		updateStylePath()
-		refreshThemeMod()
-		refreshStyleMod()
+		ctx.themeDirectory = originalDirectory
+		ctx.updateThemePath()
+		ctx.updateStylePath()
+		ctx.refreshThemeMod()
+		ctx.refreshStyleMod()
 	})
 
 	root := t.TempDir()
-	SetUserDataRoot(root)
+	ctx.SetUserDataRoot(root)
 	wantDirectory := filepath.Join(root, "themes")
-	if themeDirectory != wantDirectory {
-		t.Fatalf("themeDirectory = %q, want %q", themeDirectory, wantDirectory)
+	if ctx.themeDirectory != wantDirectory {
+		t.Fatalf("themeDirectory = %q, want %q", ctx.themeDirectory, wantDirectory)
 	}
 	for _, path := range []string{
 		filepath.Join(wantDirectory, "README.md"),
@@ -31,11 +33,11 @@ func TestSetUserDataRootMovesEditableThemes(t *testing.T) {
 			t.Fatalf("generated theme file %q: %v", path, err)
 		}
 	}
-	if want := filepath.Join(wantDirectory, "palettes", currentThemeName+".json"); themePath != want {
-		t.Fatalf("themePath = %q, want %q", themePath, want)
+	if want := filepath.Join(wantDirectory, "palettes", ctx.currentThemeName+".json"); ctx.themePath != want {
+		t.Fatalf("themePath = %q, want %q", ctx.themePath, want)
 	}
-	if want := filepath.Join(wantDirectory, "styles", currentStyleName+".json"); stylePath != want {
-		t.Fatalf("stylePath = %q, want %q", stylePath, want)
+	if want := filepath.Join(wantDirectory, "styles", ctx.currentStyleName+".json"); ctx.stylePath != want {
+		t.Fatalf("stylePath = %q, want %q", ctx.stylePath, want)
 	}
 
 	customPalette := filepath.Join(wantDirectory, "palettes", "MyPalette.json")
@@ -46,10 +48,10 @@ func TestSetUserDataRootMovesEditableThemes(t *testing.T) {
 	if err := os.WriteFile(customStyle, []byte("{}"), 0o644); err != nil {
 		t.Fatalf("write custom style: %v", err)
 	}
-	assertContainsThemeName(t, ListThemes, "MyPalette")
-	assertContainsThemeName(t, ListThemes, "AccentDark")
-	assertContainsThemeName(t, ListStyles, "MyStyle")
-	assertContainsThemeName(t, ListStyles, "Default")
+	assertContainsThemeName(t, ctx.ListThemes, "MyPalette")
+	assertContainsThemeName(t, ctx.ListThemes, "AccentDark")
+	assertContainsThemeName(t, ctx.ListStyles, "MyStyle")
+	assertContainsThemeName(t, ctx.ListStyles, "Default")
 }
 
 func assertContainsThemeName(t *testing.T, list func() ([]string, error), want string) {

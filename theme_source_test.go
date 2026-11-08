@@ -9,13 +9,15 @@ import (
 )
 
 func TestThemeSourceValidationDoesNotApply(t *testing.T) {
-	isolateThemeTest(t)
-	if err := LoadTheme("AccentDark"); err != nil {
+	ctx := newTestContext(t)
+
+	ctx.isolateThemeTest(t)
+	if err := ctx.LoadTheme("AccentDark"); err != nil {
 		t.Fatal(err)
 	}
-	previous, style, colors, name := currentTheme, currentStyle, namedColors, CurrentThemeName()
+	previous, style, colors, name := ctx.currentTheme, ctx.currentStyle, ctx.namedColors, ctx.CurrentThemeName()
 	for index, source := range []string{`{"Colors":{"accent":"#ff0000ff"},"Input":{"Color":"accent"}}`, `{"Input":{"Color":"missing"}}`, `{"Colors":{"a":"b","b":"a"}}`, `{"Slider":{"SliderFilled":"missing"}}`, `null`, `[]`, `{`} {
-		err := ValidateThemeSource([]byte(source))
+		err := ctx.ValidateThemeSource([]byte(source))
 		if index == 0 {
 			if err != nil {
 				t.Fatal(err)
@@ -23,7 +25,7 @@ func TestThemeSourceValidationDoesNotApply(t *testing.T) {
 		} else if err == nil {
 			t.Fatalf("accepted invalid palette %s", source)
 		}
-		if currentTheme != previous || currentStyle != style || CurrentThemeName() != name || !reflect.DeepEqual(namedColors, colors) {
+		if ctx.currentTheme != previous || ctx.currentStyle != style || ctx.CurrentThemeName() != name || !reflect.DeepEqual(ctx.namedColors, colors) {
 			t.Fatal("Check changed the active theme")
 		}
 	}
@@ -35,23 +37,25 @@ func TestThemeSourceValidationDoesNotApply(t *testing.T) {
 			t.Fatalf("accepted invalid style %s", source)
 		}
 	}
-	if currentStyle != style {
+	if ctx.currentStyle != style {
 		t.Fatal("Check changed the active style")
 	}
 }
 
 func TestEditableThemeCopiesPreserveUserFiles(t *testing.T) {
-	isolateThemeTest(t)
+	ctx := newTestContext(t)
+
+	ctx.isolateThemeTest(t)
 	for _, style := range []bool{false, true} {
 		name, folder := "AccentDark", "palettes"
 		if style {
 			name, folder = "Default", "styles"
 		}
-		filename, err := EditableThemeFile(name, style)
+		filename, err := ctx.EditableThemeFile(name, style)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if filename != filepath.Join(themeDirectory, folder, name+".json") {
+		if filename != filepath.Join(ctx.themeDirectory, folder, name+".json") {
 			t.Fatal(filename)
 		}
 		data, err := os.ReadFile(filename)
@@ -61,7 +65,7 @@ func TestEditableThemeCopiesPreserveUserFiles(t *testing.T) {
 		if style {
 			err = ValidateStyleSource(data)
 		} else {
-			err = ValidateThemeSource(data)
+			err = ctx.ValidateThemeSource(data)
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -73,7 +77,7 @@ func TestEditableThemeCopiesPreserveUserFiles(t *testing.T) {
 		if err := os.WriteFile(filename, custom, 0644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := EditableThemeFile(name, style); err != nil {
+		if _, err := ctx.EditableThemeFile(name, style); err != nil {
 			t.Fatal(err)
 		}
 		data, _ = os.ReadFile(filename)
@@ -82,20 +86,22 @@ func TestEditableThemeCopiesPreserveUserFiles(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"", "..", "../Default", `foo\bar`} {
-		if _, err := EditableThemeFile(name, false); err == nil {
+		if _, err := ctx.EditableThemeFile(name, false); err == nil {
 			t.Fatalf("accepted %q", name)
 		}
 	}
 }
 
 func TestThemeAndStyleSourcesUseUnicode(t *testing.T) {
-	isolateThemeTest(t)
+	ctx := newTestContext(t)
+
+	ctx.isolateThemeTest(t)
 	for _, style := range []bool{false, true} {
 		name := "AccentDark"
 		if style {
 			name = "Default"
 		}
-		filename, err := EditableThemeFile(name, style)
+		filename, err := ctx.EditableThemeFile(name, style)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,9 +109,9 @@ func TestThemeAndStyleSourcesUseUnicode(t *testing.T) {
 		if err := os.WriteFile(filename, unicode, 0644); err != nil {
 			t.Fatal(err)
 		}
-		load, check := LoadTheme, ValidateThemeSource
+		load, check := ctx.LoadTheme, ctx.ValidateThemeSource
 		if style {
-			load, check = LoadStyle, ValidateStyleSource
+			load, check = ctx.LoadStyle, ValidateStyleSource
 		}
 		if err := check(unicode); err != nil {
 			t.Fatal(err)

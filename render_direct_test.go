@@ -11,37 +11,41 @@ import (
 )
 
 func TestDrawItemAtFreshButtonUsesNormalColor(t *testing.T) {
+	ctx := newTestContext(t)
+
 	if os.Getenv("EUI_RENDER_DIRECT_TEST") == "" {
 		t.Skip("set EUI_RENDER_DIRECT_TEST=1 to render direct items")
 	}
-	if err := EnsureFontSource(goregular.TTF); err != nil {
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	previousTheme, previousRenderNow := currentTheme, renderNow
+	previousTheme, previousRenderNow := ctx.currentTheme, ctx.renderNow
 	t.Cleanup(func() {
-		currentTheme = previousTheme
-		renderNow = previousRenderNow
+		ctx.currentTheme = previousTheme
+		ctx.renderNow = previousRenderNow
 	})
 
 	theme := *baseTheme
 	theme.Button.Color = NewColor(17, 34, 51, 255)
 	theme.Button.ClickColor = NewColor(119, 136, 153, 255)
-	currentTheme = &theme
-	renderNow = time.Time{}
+	ctx.currentTheme = &theme
+	ctx.renderNow = time.Time{}
 
-	g := &directButtonColorGame{theme: &theme}
+	g := &directButtonColorGame{ctx: ctx, theme: &theme}
 	if err := ebiten.RunGame(g); err != nil {
 		t.Fatal(err)
 	}
 	if g.err != nil {
 		t.Fatal(g.err)
 	}
-	if !renderNow.IsZero() {
-		t.Fatalf("DrawItemAt left render timestamp set: %v", renderNow)
+	if !ctx.renderNow.IsZero() {
+		t.Fatalf("DrawItemAt left render timestamp set: %v", ctx.renderNow)
 	}
 }
 
 type directButtonColorGame struct {
+	ctx *Context
+
 	theme *Theme
 	done  bool
 	err   error
@@ -57,16 +61,18 @@ func (g *directButtonColorGame) Update() error {
 }
 
 func (g *directButtonColorGame) Draw(_ *ebiten.Image) {
+	ctx := g.ctx
+
 	if g.done {
 		return
 	}
 	defer func() { g.done = true }()
-	button, _ := NewButton()
+	button, _ := ctx.NewButton()
 	button.Size = Point{X: 20, Y: 20}
 	button.Fillet = 0
 	canvas := ebiten.NewImage(20, 20)
 	defer canvas.Deallocate()
-	DrawItemAt(canvas, button, Point{})
+	ctx.DrawItemAt(canvas, button, Point{})
 	r, green, b, a := canvas.At(10, 10).RGBA()
 	got := NewColor(uint8(r>>8), uint8(green>>8), uint8(b>>8), uint8(a>>8))
 	if got != g.theme.Button.Color {

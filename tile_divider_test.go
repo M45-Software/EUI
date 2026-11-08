@@ -7,6 +7,8 @@ import (
 )
 
 func TestTileDividerUsesWideGrabArea(t *testing.T) {
+	ctx := newTestContext(t)
+
 	d := TileDivider{
 		Orientation: TileDividerVertical,
 		Position:    100,
@@ -15,25 +17,27 @@ func TestTileDividerUsesWideGrabArea(t *testing.T) {
 		Thickness:   4,
 		HitSize:     16,
 	}
-	if !tileDividerHit(d, point{X: 107, Y: 100}) {
+	if !ctx.tileDividerHit(d, point{X: 107, Y: 100}) {
 		t.Fatal("divider did not include its enlarged grab area")
 	}
-	if tileDividerHit(d, point{X: 109, Y: 100}) {
+	if ctx.tileDividerHit(d, point{X: 109, Y: 100}) {
 		t.Fatal("divider grab area extended beyond its configured size")
 	}
 }
 
 func TestDockedWindowHonorsAssignedSizeOnSmallWorkspace(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	oldScale := UIScale()
-	w, h := ScreenSize()
-	t.Cleanup(func() { SetUIScale(oldScale); SetScreenSize(w, h) })
-	SetScreenSize(640, 360)
+	oldScale := ctx.UIScale()
+	w, h := ctx.ScreenSize()
+	t.Cleanup(func() { ctx.SetUIScale(oldScale); ctx.SetScreenSize(w, h) })
+	ctx.SetScreenSize(640, 360)
 	for _, scale := range []float32{1, 2} {
-		SetUIScale(scale)
-		win := NewWindow()
+		ctx.SetUIScale(scale)
+		win := ctx.NewWindow()
 		win.Resizable = true
 		win.SetDocked(true)
 		want := Point{X: 32 * scale, Y: 40 * scale}
@@ -50,11 +54,13 @@ func TestDockedWindowHonorsAssignedSizeOnSmallWorkspace(t *testing.T) {
 }
 
 func TestDockedWindowHasNoStandaloneCornerDrag(t *testing.T) {
-	originalScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = originalScale })
+	ctx := newTestContext(t)
 
-	win := NewWindow()
+	originalScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = originalScale })
+
+	win := ctx.NewWindow()
 	win.Position = point{X: 20, Y: 20}
 	win.Size = point{X: 200, Y: 100}
 	win.Movable = true
@@ -66,15 +72,17 @@ func TestDockedWindowHasNoStandaloneCornerDrag(t *testing.T) {
 }
 
 func TestDockedWindowRejectsDragAlreadyInProgress(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	win.Position = point{X: 20, Y: 20}
 	win.Size = point{X: 200, Y: 100}
 	win.Movable = true
 	win.Resizable = true
 	win.Docked = true
 
-	dragWindowMove(win, point{X: 40, Y: 30})
-	dragWindowResize(win, PART_BOTTOM_RIGHT, point{X: 40, Y: 30})
+	ctx.dragWindowMove(win, point{X: 40, Y: 30})
+	ctx.dragWindowResize(win, PART_BOTTOM_RIGHT, point{X: 40, Y: 30})
 
 	if win.Position != (point{X: 20, Y: 20}) || win.Size != (point{X: 200, Y: 100}) {
 		t.Fatalf("stale drag changed docked geometry: position=%v size=%v", win.Position, win.Size)
@@ -82,7 +90,9 @@ func TestDockedWindowRejectsDragAlreadyInProgress(t *testing.T) {
 }
 
 func TestDockedWindowDoesNotDrawStandaloneOutline(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	win.Outlined = true
 	win.Border = 2
 	if !win.drawsStandaloneOutline() {
@@ -102,11 +112,13 @@ func TestDockedWindowDoesNotDrawStandaloneOutline(t *testing.T) {
 }
 
 func TestFixedNonMovableWindowCornerDoesNotBecomeMoveHandle(t *testing.T) {
-	originalScale := uiScale
-	uiScale = 1
-	t.Cleanup(func() { uiScale = originalScale })
+	ctx := newTestContext(t)
 
-	win := NewWindow()
+	originalScale := ctx.uiScale
+	ctx.uiScale = 1
+	t.Cleanup(func() { ctx.uiScale = originalScale })
+
+	win := ctx.NewWindow()
 	win.Position = point{X: 20, Y: 20}
 	win.Size = point{X: 200, Y: 100}
 	win.Movable = false
@@ -117,46 +129,50 @@ func TestFixedNonMovableWindowCornerDoesNotBecomeMoveHandle(t *testing.T) {
 }
 
 func TestStandaloneWindowCoversWorkspaceDivider(t *testing.T) {
-	originalWindows := windows
-	originalScale := uiScale
-	uiScale = 1
+	ctx := newTestContext(t)
+
+	originalWindows := ctx.windows
+	originalScale := ctx.uiScale
+	ctx.uiScale = 1
 	t.Cleanup(func() {
-		windows = originalWindows
-		uiScale = originalScale
+		ctx.windows = originalWindows
+		ctx.uiScale = originalScale
 	})
 
-	utility := NewWindow()
+	utility := ctx.NewWindow()
 	utility.Open = true
 	utility.Position = point{X: 80, Y: 40}
 	utility.Size = point{X: 80, Y: 120}
-	windows = []*windowData{utility}
+	ctx.windows = []*windowData{utility}
 
-	if !tileDividerCoveredByStandaloneWindow(point{X: 100, Y: 100}) {
+	if !ctx.tileDividerCoveredByStandaloneWindow(point{X: 100, Y: 100}) {
 		t.Fatal("standalone window did not cover workspace divider input")
 	}
 	utility.Docked = true
-	if tileDividerCoveredByStandaloneWindow(point{X: 100, Y: 100}) {
+	if ctx.tileDividerCoveredByStandaloneWindow(point{X: 100, Y: 100}) {
 		t.Fatal("docked pane incorrectly covered workspace divider input")
 	}
 }
 
 func TestStandaloneWindowsReceiveInputAboveDockedPanes(t *testing.T) {
-	originalWindows := windows
-	originalOrder := inputWindowOrder
+	ctx := newTestContext(t)
+
+	originalWindows := ctx.windows
+	originalOrder := ctx.inputWindowOrder
 	t.Cleanup(func() {
-		windows = originalWindows
-		inputWindowOrder = originalOrder
+		ctx.windows = originalWindows
+		ctx.inputWindowOrder = originalOrder
 	})
 
-	utilityBack := NewWindow()
-	utilityFront := NewWindow()
-	dockedBack := NewWindow()
-	dockedFront := NewWindow()
+	utilityBack := ctx.NewWindow()
+	utilityFront := ctx.NewWindow()
+	dockedBack := ctx.NewWindow()
+	dockedFront := ctx.NewWindow()
 	dockedBack.Docked = true
 	dockedFront.Docked = true
-	windows = []*windowData{utilityBack, dockedBack, utilityFront, dockedFront}
+	ctx.windows = []*windowData{utilityBack, dockedBack, utilityFront, dockedFront}
 
-	got := windowsFrontToBack()
+	got := ctx.windowsFrontToBack()
 	want := []*windowData{utilityFront, utilityBack, dockedFront, dockedBack}
 	if len(got) != len(want) {
 		t.Fatalf("input order has %d windows, want %d", len(got), len(want))
@@ -169,31 +185,35 @@ func TestStandaloneWindowsReceiveInputAboveDockedPanes(t *testing.T) {
 }
 
 func TestPointerCursorClaimedTracksEUIResizeCursor(t *testing.T) {
-	original := cursorShape
-	t.Cleanup(func() { cursorShape = original })
+	ctx := newTestContext(t)
 
-	cursorShape = ebiten.CursorShapeEWResize
-	if !PointerCursorClaimed() {
+	original := ctx.cursorShape
+	t.Cleanup(func() { ctx.cursorShape = original })
+
+	ctx.cursorShape = ebiten.CursorShapeEWResize
+	if !ctx.PointerCursorClaimed() {
 		t.Fatal("resize cursor was not claimed by EUI")
 	}
-	cursorShape = ebiten.CursorShapeDefault
-	if PointerCursorClaimed() {
+	ctx.cursorShape = ebiten.CursorShapeDefault
+	if ctx.PointerCursorClaimed() {
 		t.Fatal("default cursor remained claimed by EUI")
 	}
 }
 
 func TestDockedWindowReopensWithoutMovingNearAnchor(t *testing.T) {
-	originalWindows, originalCallback := windows, WindowStateChanged
-	WindowStateChanged = nil
+	ctx := newTestContext(t)
+
+	originalWindows, originalCallback := ctx.windows, ctx.WindowStateChanged
+	ctx.WindowStateChanged = nil
 	t.Cleanup(func() {
-		windows, WindowStateChanged = originalWindows, originalCallback
+		ctx.windows, ctx.WindowStateChanged = originalWindows, originalCallback
 	})
-	win := NewWindow()
+	win := ctx.NewWindow()
 	win.Docked = true
 	win.Position = point{X: 20, Y: 30}
 	win.Size = point{X: 200, Y: 100}
 	position, size := win.Position, win.Size
-	anchor := &itemData{DrawRect: rect{X0: 400, Y0: 400, X1: 450, Y1: 425}}
+	anchor := &itemData{ctx: ctx, DrawRect: rect{X0: 400, Y0: 400, X1: 450, Y1: 425}}
 	win.MarkOpen()
 	for i := 0; i < 3; i++ {
 		win.Close()

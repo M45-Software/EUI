@@ -10,8 +10,10 @@ import (
 )
 
 func TestSliderConstrainedWidth(t *testing.T) {
-	uiScale = 1
-	item := &itemData{
+	ctx := newTestContext(t)
+
+	ctx.uiScale = 1
+	item := &itemData{ctx: ctx,
 		ItemType: ITEM_SLIDER,
 		MinValue: 0,
 		MaxValue: 1,
@@ -21,11 +23,11 @@ func TestSliderConstrainedWidth(t *testing.T) {
 	}
 	item.DrawRect = rect{X0: 0, Y0: 0, X1: 30, Y1: 20}
 
-	textSize := (item.FontSize * uiScale) + 2
-	face := textFace(textSize)
+	textSize := (item.FontSize * ctx.uiScale) + 2
+	face := ctx.textFace(textSize)
 	maxW, _ := text.Measure(sliderMaxLabel, face, 0)
-	gap := currentStyle.SliderValueGap
-	knobW := item.AuxSize.X * uiScale
+	gap := ctx.currentStyle.SliderValueGap
+	knobW := item.AuxSize.X * ctx.uiScale
 
 	trackWidth := item.DrawRect.X1 - item.DrawRect.X0 - knobW - gap - float32(maxW)
 	showValue := true

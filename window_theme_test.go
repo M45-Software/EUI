@@ -3,19 +3,21 @@ package eui
 import "testing"
 
 func TestNewWindowBackgroundFollowsTheme(t *testing.T) {
-	originalTheme := currentTheme
-	originalWindows := windows
+	ctx := newTestContext(t)
+
+	originalTheme := ctx.currentTheme
+	originalWindows := ctx.windows
 	defer func() {
-		currentTheme = originalTheme
-		windows = originalWindows
+		ctx.currentTheme = originalTheme
+		ctx.windows = originalWindows
 	}()
 
 	first := *baseTheme
 	first.Window.BGColor = NewColor(1, 2, 3, 255)
 	first.Window.TitleBGColor = NewColor(4, 5, 6, 255)
-	currentTheme = &first
+	ctx.currentTheme = &first
 
-	win := NewWindow()
+	win := ctx.NewWindow()
 	if win.BGColor != (Color{}) || win.TitleBGColor != (Color{}) {
 		t.Fatal("new window copied theme backgrounds into per-window overrides")
 	}
@@ -29,8 +31,8 @@ func TestNewWindowBackgroundFollowsTheme(t *testing.T) {
 	second := *baseTheme
 	second.Window.BGColor = NewColor(7, 8, 9, 255)
 	second.Window.TitleBGColor = NewColor(10, 11, 12, 255)
-	windows = []*windowData{win}
-	updateThemeReferences(&first, &second)
+	ctx.windows = []*windowData{win}
+	ctx.updateThemeReferences(&first, &second)
 
 	if got := win.backgroundColor(); got != second.Window.BGColor {
 		t.Fatalf("updated background = %v, want %v", got, second.Window.BGColor)
@@ -41,7 +43,9 @@ func TestNewWindowBackgroundFollowsTheme(t *testing.T) {
 }
 
 func TestWindowBackgroundOverrideSurvivesThemeChange(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	override := NewColor(20, 30, 40, 200)
 	win.BGColor = override
 

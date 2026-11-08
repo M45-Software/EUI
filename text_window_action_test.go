@@ -6,17 +6,19 @@ import (
 )
 
 func TestTextWindowInputActionReservesSpaceAndStaysOutsideScrollingInput(t *testing.T) {
-	if err := Init(); err != nil {
+	ctx := newTestContext(t)
+
+	if err := ctx.initFonts(); err != nil {
 		t.Fatal(err)
 	}
-	win, list, input := NewTextWindow("Chat", HZoneLeft, VZoneTop, true)
+	win, list, input := ctx.NewTextWindow("Chat", HZoneLeft, VZoneTop, true)
 	defer win.RemoveWindow()
 	win.Size = Point{X: 260, Y: 180}
-	action, _ := NewButton()
+	action, _ := ctx.NewButton()
 	action.Size = Point{X: 28, Y: 28}
 	var cache TextWindowWrapCache
 	options := TextWindowOptions{FontSize: 12, InputText: strings.Repeat("a long draft ", 40), InputEditable: true, InputAction: action}
-	UpdateTextWindow(win, list, input, nil, options, &cache)
+	ctx.UpdateTextWindow(win, list, input, nil, options, &cache)
 	row := input.Parent
 	if row == list.Parent || row.Scrollable || action.Parent != row || !input.Scrollable {
 		t.Fatal("action shares the scrolling input viewport")
@@ -26,13 +28,13 @@ func TestTextWindowInputActionReservesSpaceAndStaysOutsideScrollingInput(t *test
 	}
 	withAction := input.Size.X
 	options.InputAction = nil
-	UpdateTextWindow(win, list, input, nil, options, &cache)
+	ctx.UpdateTextWindow(win, list, input, nil, options, &cache)
 	if len(row.Contents) != 1 || input.Size.X <= withAction {
 		t.Fatal("hiding action did not reclaim its space")
 	}
 	options.InputText = "short"
 	options.InputAction = action
-	UpdateTextWindow(win, list, input, nil, options, &cache)
+	ctx.UpdateTextWindow(win, list, input, nil, options, &cache)
 	if input.Scrollable || row.Size.Y < action.Size.Y || input.Size.Y != row.Size.Y {
 		t.Fatal("single-line input does not fit the action")
 	}

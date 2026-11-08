@@ -3,7 +3,9 @@ package eui
 import "testing"
 
 func TestWindowTitleCacheIgnoresContentInvalidation(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	win.Title = "Players"
 	win.Size = point{X: 640, Y: 480}
 	win.TitleHeight = 24

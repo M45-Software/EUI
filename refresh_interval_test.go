@@ -8,7 +8,9 @@ import (
 )
 
 func TestWindowRefreshIntervalCoalescesRepeatedInvalidations(t *testing.T) {
-	win := NewWindow()
+	ctx := newTestContext(t)
+
+	win := ctx.NewWindow()
 	win.Render = ebiten.NewImage(1, 1)
 	t.Cleanup(func() { win.Render.Deallocate() })
 	win.SetRefreshInterval(time.Second)

@@ -7,7 +7,7 @@ permissions:
 jobs:
   linux:
     env:
-      CGO_ENABLED: 0
+      CGO_ENABLED: "0"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,3 +26,58 @@ jobs:
         run: xvfb-run -a go run ./examples/studio -tab Editor -screenshot /tmp/studio-editor.png
       - name: Text editor rendering regression
         run: EUI_TEXT_EDIT_CAPTURE=/tmp/text-editor.png xvfb-run -a go test -run '^TestRenderTextEditing$' .
+      - name: Independent context rendering regression
+        run: EUI_CONTEXT_CAPTURE=/tmp/contexts.png xvfb-run -a go test -run '^TestRenderIndependentContexts$' .
+      - name: Large-document rendering regression
+        run: EUI_LARGE_CAPTURE=/tmp/large-document.png xvfb-run -a go test -run '^TestRenderLargeDocument$' .
+      - name: Large-interface benchmark smoke test
+        run: |
+          set -o pipefail
+          xvfb-run -a go test -run '^$' -bench '^BenchmarkLargeInterface($|Frames$)' -benchtime=1x -count=1 -benchmem . | tee /tmp/large-ui-benchmarks.txt
+      - name: Preserve performance smoke results
+        uses: actions/upload-artifact@v4
+        with:
+          name: large-ui-linux
+          path: /tmp/large-ui-benchmarks.txt
+      - name: IME composition rendering regression
+        run: EUI_IME_CAPTURE=/tmp/ime-composition.png xvfb-run -a go test -run '^TestRenderIMEComposition$' .
+      - name: Keyboard focus rendering regression
+        run: EUI_KEYBOARD_CAPTURE=/tmp/keyboard-focus.png xvfb-run -a go test -run '^TestRenderKeyboardFocus$' .
+      - name: Runtime setter rendering regression
+        run: EUI_RUNTIME_CAPTURE=/tmp/runtime-updates.png xvfb-run -a go test -run '^TestRenderRuntimeUpdates$' .
+
+      - name: Responsive layout rendering regression
+        run: EUI_LAYOUT_CAPTURE=/tmp/responsive-layout.png xvfb-run -a go test -run '^TestRenderResponsiveLayout$' .
+      - name: Narrow Studio editor render smoke test
+        run: xvfb-run -a go run ./examples/studio -width 360 -height 640 -tab Editor -screenshot /tmp/studio-narrow-editor.png
+      - name: Interaction replay rendering regression
+        run: EUI_INTERACTION_CAPTURE=/tmp/interaction-replay.png xvfb-run -a go test -run '^TestRenderInteractionReplay$' .
+  native:
+    name: Native tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Unit, integration, and replay sequences
+        run: go test -count=1 -timeout=3m -tags 'integration test' ./...
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Native Studio editor smoke test
+        run: go run ./examples/studio -width 960 -height 800 -tab Editor -screenshot studio-native.png
+      - name: Preserve native render
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-${{ matrix.os }}
+          path: studio-native.png
+          if-no-files-found: ignore
