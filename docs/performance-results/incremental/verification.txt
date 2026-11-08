@@ -1,0 +1,37 @@
+Document performance verification, 2026-11-08
+
+PASS: go test -count=1 -tags 'integration test' ./...
+Includes UTF-8 gap-buffer rune oracles, arbitrary history restoration, immutable
+published values, paragraph reuse across batched edits, randomized cold-layout
+comparisons, wrap-partition width comparisons, CRLF/grapheme navigation,
+password boundaries, and an IME callback that resets text while opening a modal.
+
+PASS: EUI_INCREMENTAL_CAPTURE=<PNG> go test -count=1 -run '^TestRenderIncrementalDocument$' .
+Edits, undo/redo, reflow, highlighting and composition match fresh layout pixels
+in AccentDark/Paper at scales 1, 1.5 and 2.
+
+PASS: local regression matrix: context/primitive/text caches, large document,
+IME, interaction replay, responsive layout, runtime setters, keyboard focus,
+editor, window-title and tooltip pixels; modal/form/gamepad pixels; Studio
+screenshots in dark/light, Editor/Forms and compact layouts.
+PASS: benchmark-large-ui.sh smoke with BENCHTIME=1x COUNT=1, including the new
+BenchmarkDocumentEdits cases (middle/wrapped typing, paste, Backspace, preedit).
+PASS: go vet ./... and go build -buildvcs=false ./...
+PASS: benchmark script shell syntax and workflow YAML parsing.
+
+PASS: isolated native Linux X11/IBus probe on 10,000 lines:
+- Native preedit then commit: exactly one document change.
+- Keyboard undo/redo: original and committed documents restored.
+- Two wrap toggles: source and caret preserved.
+- A second preedit then Escape: no document change.
+- Native Backspace then undo: composed character deleted/restored.
+- Final assertion: five events, two wrap toggles, 350006 bytes, caret rune 250004.
+
+PASS: Windows amd64 root test executable and all-package build cross-compile.
+PASS: macOS arm64 root test executable and all-package build cross-compile.
+PASS: complete Windows root tests under Wine, plus independent incremental
+and IME render tests. Wine is emulation, not native Windows IME validation.
+
+Hosted Actions remains unavailable due to the previously confirmed account
+billing/spending-limit condition. Real Windows/macOS IME sessions remain
+unverified. All timings describe local CPU workloads, not frame-rate guarantees.

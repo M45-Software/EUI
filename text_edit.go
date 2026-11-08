@@ -1,0 +1,605 @@
+package eui
+
+import (
+	"slices"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/M45-Software/EUI/internal/inputkeys"
+
+	"github.com/go-text/typesetting/segmenter"
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
+)
+
+type textEditSnapshot struct {
+	text                string
+	cursor, anchor, end int
+}
+
+type textEditState struct {
+	buffer             *editBuffer
+	composition        *editComposition
+	known              string
+	runeCount          int
+	initialized        bool
+	undo, redo         []textEditSnapshot
+	group              string
+	changed            time.Time
+	caretReset         time.Time
+	caretOn            bool
+	caretUpstream      bool // caret at the end of a soft-wrapped row
+	scroll             point
+	zoomWheel          float32
+	followCaret        bool
+	preferredX         float32
+	hasPreferredX      bool
+	lastClick          time.Time
+	lastClickPos       point
+	clickCount         int
+	dragStart, dragEnd int
+	scrollDrag         dragType
+	scrollGrab         float32
+	layout             *editTextLayout
+	highlightText      string
+	highlightsValid    bool
+	swatchText         string
+	swatchesValid      bool
+	swatches           []TextColorSpan
+	highlights         []TextColorSpan
+	highlightGlyphs    []text.LazyGlyph
+	highlightDraws     []editGlyphDraw
+}
+
+func (item *itemData) editText() string {
+	if item.HideText {
+		return item.SecretText
+	}
+	return item.Text
+}
+
+func (item *itemData) editor() *textEditState {
+	if item.textEdit == nil {
+		item.textEdit = &textEditState{}
+	}
+	s := item.textEdit
+	value := item.editText()
+	if !s.initialized || s.known != value {
+		if s.initialized {
+			item.CancelComposition()
+		}
+		// Direct application assignments start a new document/history.
+		*s = textEditState{initialized: true, known: value, runeCount: utf8.RuneCountInString(value), followCaret: true, caretOn: true}
+	}
+	n := s.runeCount
+	item.CursorPos = max(0, min(item.CursorPos, n))
+	item.SelectStart = max(0, min(item.SelectStart, n))
+	item.SelectEnd = max(0, min(item.SelectEnd, n))
+	return s
+}
+
+func (item *itemData) editSnapshot() textEditSnapshot {
+	return textEditSnapshot{item.editText(), item.CursorPos, item.SelectStart, item.SelectEnd}
+}
+
+func (item *itemData) editSelection() (int, int) {
+	item.editor()
+	return min(item.SelectStart, item.SelectEnd), max(item.SelectStart, item.SelectEnd)
+}
+
+func (item *itemData) resetCaret() {
+	ctx := item.ui()
+
+	s := item.editor()
+	s.caretReset, s.caretOn, s.followCaret = ctx.updateNow, true, true
+	if s.caretReset.IsZero() {
+		s.caretReset = ctx.uiNow()
+	}
+	item.markDirty()
+}
+
+func (item *itemData) editSelect(anchor, end int) {
+	item.CancelComposition()
+	item.setEditSelection(anchor, end)
+}
+func (item *itemData) setEditSelection(anchor, end int) {
+	ctx := item.ui()
+
+	if ctx.selectedTextItem != nil && ctx.selectedTextItem != item {
+		ctx.clearTextSelection()
+	}
+	n := item.editor().runeCount
+	item.SelectStart = max(0, min(anchor, n))
+	item.SelectEnd = max(0, min(end, n))
+	item.CursorPos = item.SelectEnd
+	item.editor().caretUpstream = false
+	ctx.selectedTextItem = item
+	item.resetCaret()
+}
+
+func (item *itemData) editMove(pos int, extend bool) {
+	s := item.editor()
+	s.group = ""
+	anchor := pos
+	if extend {
+		anchor = item.SelectStart
+		if item.SelectStart == item.SelectEnd {
+			anchor = item.CursorPos
+		}
+	}
+	item.editSelect(anchor, pos)
+}
+
+// Bound retained snapshots by count and bytes. Passwords never retain history.
+func trimTextHistory(history []textEditSnapshot) []textEditSnapshot {
+	bytes, start := 0, len(history)
+	for start > 0 && len(history)-start < 100 {
+		cost := len(history[start-1].text)
+		if bytes+cost > 2<<20 {
+			break
+		}
+		bytes += cost
+		start--
+	}
+	if start > 0 {
+		history = slices.Clone(history[start:])
+	}
+	return history
+}
+
+func (item *itemData) setEditedText(value string) {
+	item.setEditedDocument(value, utf8.RuneCountInString(value), nil)
+}
+
+func (item *itemData) setEditedDocument(value string, count int, buffer *editBuffer) {
+	if item.HideText {
+		item.SecretText = value
+		item.Text = strings.Repeat("*", count)
+	} else {
+		item.Text = value
+	}
+	if item.TextPtr != nil {
+		// NewInput's default TextPtr points to the display string.
+		if !item.HideText || item.TextPtr != &item.Text {
+			*item.TextPtr = value
+		}
+	}
+	item.textEdit.known = value
+	item.textEdit.runeCount = count
+	item.textEdit.buffer = buffer
+}
+
+func (item *itemData) emitTextChanged() {
+	item.resetCaret()
+	item.validateFormEdit()
+	item.emitEvent(UIEvent{Type: EventInputChanged, Text: item.Text})
+}
+
+func (item *itemData) editReplace(start, end int, insert, group string) {
+	item.editReplaceAt(start, end, insert, group, -1, false)
+}
+func (item *itemData) editReplaceAt(start, end int, insert, group string, caret int, fromIME bool) bool {
+	ctx := item.ui()
+
+	if !fromIME {
+		item.CancelComposition()
+	}
+	s := item.editor()
+	start, end = max(0, min(start, s.runeCount)), max(0, min(end, s.runeCount))
+	if start > end {
+		start, end = end, start
+	}
+	if s.buffer == nil {
+		s.buffer = newEditBuffer(item.editText())
+	}
+	value := s.buffer.replace(start, end, insert)
+	if value == item.editText() {
+		return false
+	}
+	if !item.HideText {
+		if group == "" || group != s.group || ctx.updateNow.Sub(s.changed) > time.Second || len(s.redo) > 0 {
+			s.undo = trimTextHistory(append(s.undo, item.editSnapshot()))
+		}
+		s.redo = nil
+	}
+	s.group, s.changed, s.hasPreferredX = group, ctx.updateNow, false
+	item.setEditedDocument(value, s.buffer.runes, s.buffer)
+	pos := s.buffer.gapRune
+	if caret >= 0 {
+		pos = caret
+	}
+	item.setEditSelection(pos, pos)
+	item.emitTextChanged()
+	return true
+}
+
+func (item *itemData) normalizeEditText(value string) string {
+	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
+	value = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			if item.Multiline {
+				return r
+			}
+			return ' '
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, value)
+	return value
+}
+func (item *itemData) editInsert(value, group string) {
+	value = item.normalizeEditText(value)
+
+	if value == "" {
+		return
+	}
+	start, end := item.editSelection()
+	if start == end {
+		start, end = item.CursorPos, item.CursorPos
+	} else {
+		group = ""
+	}
+	if item.textLimit > 0 {
+		runes := []rune(value)
+		available := max(0, item.textLimit-item.editor().runeCount+(end-start))
+		value = string(runes[:min(len(runes), available)])
+		if value == "" {
+			return
+		}
+	}
+	item.editReplace(start, end, value, group)
+}
+
+// ReplaceText replaces an editor's document as one undoable edit. Cursor and
+// selection offsets are retained, clamped to the new document. The caller may
+// remap them afterward when applying a transformation such as formatting.
+// Unlike assigning Text directly, this preserves the existing undo history.
+func (item *itemData) ReplaceText(value string) {
+	if item.isDisabled() || item.HideText || !itemAcceptsTextEditing(item) {
+		return
+	}
+	before := item.editSnapshot()
+	item.editReplace(0, item.editor().runeCount, value, "")
+	n := item.editor().runeCount
+	item.CursorPos = max(0, min(before.cursor, n))
+	item.SelectStart = max(0, min(before.anchor, n))
+	item.SelectEnd = max(0, min(before.end, n))
+	item.resetCaret()
+}
+
+// CanUndo reports whether Undo can restore an earlier editor state.
+func (item *itemData) CanUndo() bool {
+	return !item.isDisabled() && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().undo) > 0
+}
+
+// CanRedo reports whether Redo can restore an undone editor state.
+func (item *itemData) CanRedo() bool {
+	return !item.isDisabled() && !item.HideText && itemAcceptsTextEditing(item) && len(item.editor().redo) > 0
+}
+
+// Undo restores the previous text, caret, and selection and emits InputChanged.
+// It is a no-op when CanUndo is false.
+func (item *itemData) Undo() {
+	if item.CanUndo() {
+		item.editUndo(false)
+	}
+}
+
+// Redo restores the next text, caret, and selection and emits InputChanged.
+// It is a no-op when CanRedo is false.
+func (item *itemData) Redo() {
+	if item.CanRedo() {
+		item.editUndo(true)
+	}
+}
+
+func (item *itemData) editUndo(redo bool) {
+	ctx := item.ui()
+
+	item.CancelComposition()
+	s := item.editor()
+	if item.HideText {
+		return
+	}
+	from, to := &s.undo, &s.redo
+	if redo {
+		from, to = to, from
+	}
+	if len(*from) == 0 {
+		return
+	}
+	snapshot := (*from)[len(*from)-1]
+	*to = trimTextHistory(append(*to, item.editSnapshot()))
+	*from = (*from)[:len(*from)-1]
+	s.group, s.hasPreferredX = "", false
+	if s.buffer != nil {
+		s.buffer.restore(item.editText(), snapshot.text)
+		item.setEditedDocument(snapshot.text, s.buffer.runes, s.buffer)
+	} else {
+		item.setEditedText(snapshot.text)
+	}
+	item.CursorPos, item.SelectStart, item.SelectEnd = snapshot.cursor, snapshot.anchor, snapshot.end
+	ctx.selectedTextItem = item
+	item.emitTextChanged()
+}
+
+func graphemeStops(value string) []int {
+	var seg segmenter.Segmenter
+	runes := []rune(value)
+	seg.Init(runes)
+	it := seg.GraphemeIterator()
+	stops := make([]int, 1, len(runes)+1)
+	for it.Next() {
+		g := it.Grapheme()
+		stops = append(stops, g.Offset+len(g.Text))
+	}
+	return stops
+}
+
+func editCharBoundary(value string, pos, direction int) int {
+	stops := graphemeStops(value)
+	if direction < 0 {
+		for i := len(stops) - 1; i >= 0; i-- {
+			if stops[i] < pos {
+				return stops[i]
+			}
+		}
+		return 0
+	}
+	for _, p := range stops {
+		if p > pos {
+			return p
+		}
+	}
+	return stops[len(stops)-1]
+}
+
+func editWordClass(r rune) int {
+	if unicode.IsSpace(r) {
+		return 0
+	}
+	if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || r == '_' {
+		return 1
+	}
+	return 2
+}
+
+func editWordBoundary(value string, pos, direction int, mac bool) int {
+	r := []rune(value)
+	pos = max(0, min(pos, len(r)))
+	if direction < 0 {
+		for pos > 0 && editWordClass(r[pos-1]) == 0 {
+			pos--
+		}
+		if pos > 0 {
+			class := editWordClass(r[pos-1])
+			for pos > 0 && editWordClass(r[pos-1]) == class {
+				pos--
+			}
+		}
+	} else {
+		if mac {
+			for pos < len(r) && editWordClass(r[pos]) == 0 {
+				pos++
+			}
+		}
+		if pos < len(r) {
+			class := editWordClass(r[pos])
+			for pos < len(r) && editWordClass(r[pos]) == class {
+				pos++
+			}
+		}
+		if !mac {
+			for pos < len(r) && editWordClass(r[pos]) == 0 {
+				pos++
+			}
+		}
+	}
+	return pos
+}
+
+func editLineBounds(value string, pos int) (int, int) {
+	r := []rune(value)
+	start, end := max(0, min(pos, len(r))), max(0, min(pos, len(r)))
+	for start > 0 && r[start-1] != '\n' {
+		start--
+	}
+	for end < len(r) && r[end] != '\n' {
+		end++
+	}
+	return start, end
+}
+
+func (item *itemData) editIndent(outdent bool) {
+	start, end := item.editSelection()
+	oldCursor, hadSelection := item.CursorPos, start != end
+	if start == end && !outdent {
+		item.editInsert("\t", "")
+		return
+	}
+	r := []rune(item.editText())
+	if start == end {
+		start, end = item.CursorPos, item.CursorPos
+	}
+	start, _ = editLineBounds(string(r), start)
+	// A selection ending at the beginning of a line does not indent that line.
+	if end > start && r[end-1] == '\n' {
+		end--
+	}
+	_, end = editLineBounds(string(r), end)
+	lines := strings.Split(string(r[start:end]), "\n")
+	for i, line := range lines {
+		if !outdent {
+			lines[i] = "\t" + line
+			continue
+		}
+		if strings.HasPrefix(line, "\t") {
+			lines[i] = line[1:]
+		} else {
+			n := 0
+			for n < min(4, len(line)) && line[n] == ' ' {
+				n++
+			}
+			lines[i] = line[n:]
+		}
+	}
+	insert := strings.Join(lines, "\n")
+	item.editReplace(start, end, insert, "")
+	if hadSelection {
+		item.editSelect(start, start+len([]rune(insert)))
+	} else {
+		pos := max(start, oldCursor-(end-start-len([]rune(insert))))
+		item.editSelect(pos, pos)
+	}
+}
+
+// editKey is independent of physical key polling, making platform shortcut and
+// selection behavior testable without synthesizing OS input.
+func (item *itemData) editKey(key ebiten.Key, mods inputkeys.Modifiers, shift bool) bool {
+	if !itemHandlesTextEditing(item) {
+		return false
+	}
+	s := item.editor()
+	if mods.Shortcut() {
+		switch key {
+		case ebiten.KeyEqual, ebiten.KeyKPAdd, ebiten.KeyMinus, ebiten.KeyKPSubtract:
+			if item.OnTextZoom != nil {
+				steps := 1
+				if key == ebiten.KeyMinus || key == ebiten.KeyKPSubtract {
+					steps = -1
+				}
+				item.OnTextZoom(steps)
+				return true
+			}
+		case ebiten.KeyA:
+			s.group = ""
+			item.editSelect(0, s.runeCount)
+			return true
+		case ebiten.KeyZ:
+			item.editUndo(shift)
+			return true
+		case ebiten.KeyY:
+			item.editUndo(true)
+			return true
+		}
+	}
+	pos := item.CursorPos
+	start, end := item.editSelection()
+	direction := 1
+	if key == ebiten.KeyArrowLeft || key == ebiten.KeyBackspace || key == ebiten.KeyArrowUp || key == ebiten.KeyPageUp {
+		direction = -1
+	}
+	boundary := func() int {
+		if mods.Line() {
+			a, b := item.sourceLineBounds(pos)
+			if key == ebiten.KeyArrowLeft || key == ebiten.KeyArrowRight {
+				a, b = item.editVisualLineBounds()
+			}
+			if direction < 0 {
+				return a
+			}
+			return b
+		}
+		if mods.Word() {
+			return editWordBoundary(item.editText(), pos, direction, mods.Mac)
+		}
+		return item.charBoundary(pos, direction)
+	}
+	switch key {
+	case ebiten.KeyArrowLeft, ebiten.KeyArrowRight:
+		s.hasPreferredX = false
+		if !shift && start != end {
+			pos = end
+			if direction < 0 {
+				pos = start
+			}
+		} else {
+			pos = boundary()
+		}
+		item.editMove(pos, shift)
+		if mods.Line() && direction > 0 {
+			s.caretUpstream = true
+		}
+	case ebiten.KeyHome, ebiten.KeyEnd:
+		s.hasPreferredX = false
+		a, b := item.editVisualLineBounds()
+		if mods.Shortcut() {
+			a, b = 0, s.runeCount
+		}
+		pos = b
+		if key == ebiten.KeyHome {
+			pos = a
+		}
+		item.editMove(pos, shift)
+		if key == ebiten.KeyEnd && !mods.Shortcut() {
+			s.caretUpstream = true
+		}
+	case ebiten.KeyArrowUp, ebiten.KeyArrowDown, ebiten.KeyPageUp, ebiten.KeyPageDown:
+		if !item.Multiline {
+			return false
+		}
+		if mods.Line() {
+			pos = s.runeCount
+			if direction < 0 {
+				pos = 0
+			}
+			item.editMove(pos, shift)
+		} else {
+			item.editVertical(direction, key == ebiten.KeyPageUp || key == ebiten.KeyPageDown, shift)
+		}
+	case ebiten.KeyBackspace, ebiten.KeyDelete:
+		group := ""
+		if start == end {
+			start, end = pos, boundary()
+			group = "delete"
+			if direction < 0 {
+				group = "backspace"
+			}
+		}
+		item.editReplace(start, end, "", group)
+	case ebiten.KeyEnter, ebiten.KeyKPEnter:
+		if !item.Multiline {
+			return false
+		}
+		item.editInsert("\n", "")
+	case ebiten.KeyTab:
+		if !shift && !mods.Control && !mods.Meta && !mods.Alt {
+			if suffix := item.textCompletion(); suffix != "" {
+				item.editInsert(suffix, "")
+				return true
+			}
+		}
+		if !item.Multiline || !item.AcceptTab || mods.Control || mods.Meta {
+			return false
+		}
+		item.editIndent(shift)
+	default:
+		return false
+	}
+	return true
+}
+
+func (item *itemData) textCompletion() string {
+	if item.CompleteText == nil || item.Multiline || item.HideText || !item.Focused || item.isDisabled() ||
+		item.SelectStart != item.SelectEnd || item.CursorPos != item.editor().runeCount {
+		return ""
+	}
+	suffix := item.CompleteText(item.editText())
+	if strings.ContainsAny(suffix, "\r\n\t") {
+		return ""
+	}
+	return suffix
+}
+
+func (item *itemData) editVisualLineBounds() (int, int) {
+	if !item.WordWrap || !item.Multiline {
+		return item.sourceLineBounds(item.CursorPos)
+	}
+	row, _ := item.editCaret()
+	line := item.editLayout().lines[row]
+	return line.start, line.start + line.length
+}

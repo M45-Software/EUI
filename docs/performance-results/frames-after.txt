@@ -1,0 +1,19 @@
+ATTENTION: default value of option mesa_glthread overridden by environment.
+goos: linux
+goarch: amd64
+pkg: github.com/Distortions81/EUI
+cpu: AMD Ryzen 9 7950X 16-Core Processor
+BenchmarkLargeInterfaceFrames/ListScroll/1000-32         	     445	    835428 ns/op	  505011 B/op	     246 allocs/op
+BenchmarkLargeInterfaceFrames/ListScroll/1000-32         	     439	    882392 ns/op	  544887 B/op	     244 allocs/op
+BenchmarkLargeInterfaceFrames/ListScroll/1000-32         	     462	    818947 ns/op	  239298 B/op	     245 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/1000-32     	     243	   1493379 ns/op	   52699 B/op	     152 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/1000-32     	     230	   1553925 ns/op	   52834 B/op	     152 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/1000-32     	     268	   1335995 ns/op	   52688 B/op	     152 allocs/op
+BenchmarkLargeInterfaceFrames/ListScroll/10000-32        	     193	   1855344 ns/op	  243272 B/op	     244 allocs/op
+BenchmarkLargeInterfaceFrames/ListScroll/10000-32        	     189	   1883416 ns/op	  243483 B/op	     245 allocs/op
+BenchmarkLargeInterfaceFrames/ListScroll/10000-32        	     192	   1917127 ns/op	  243471 B/op	     244 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/10000-32    	     266	   1347980 ns/op	   52875 B/op	     152 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/10000-32    	     267	   1490290 ns/op	 4074637 B/op	     152 allocs/op
+BenchmarkLargeInterfaceFrames/DocumentScroll/10000-32    	     236	   1497036 ns/op	   52579 B/op	     152 allocs/op
+PASS
+ok  	github.com/Distortions81/EUI	34.463s

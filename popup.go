@@ -1,0 +1,159 @@
+package eui
+
+import (
+	"strings"
+
+	text "github.com/hajimehoshi/ebiten/v2/text/v2"
+)
+
+// PopupButton defines a button in a popup dialog.
+type PopupButton struct {
+	Text       string
+	Width      float32
+	Color      *Color
+	HoverColor *Color
+	Action     func()
+	// Default selects the Enter action; Cancel selects Escape/close in a modal.
+	Default, Cancel bool
+}
+
+// ShowPopup opens a floating, nonmodal dialog. Actions run before close;
+// closing removes the temporary window. Use ShowModal to block other windows.
+func (ctx *Context) ShowPopup(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
+	ctx.mustAlive()
+	return ctx.showPopup(title, message, buttons, false, extras...)
+}
+
+// ShowModal opens a modal popup. Explicit Default/Cancel button roles determine
+// Enter/Escape actions. The first button is the default if none is designated;
+// without a cancel action, Escape closes a Closable dialog.
+func (ctx *Context) ShowModal(title, message string, buttons []PopupButton, extras ...*ItemData) *WindowData {
+	ctx.mustAlive()
+	return ctx.showPopup(title, message, buttons, true, extras...)
+}
+func (ctx *Context) showPopup(title, message string, buttons []PopupButton, modal bool, extras ...*ItemData) *WindowData {
+	defaults, cancels := 0, 0
+	for _, button := range buttons {
+		if button.Default {
+			defaults++
+		}
+		if button.Cancel {
+			cancels++
+		}
+	}
+	if defaults > 1 || cancels > 1 {
+		panic("eui: popup permits one default and one cancel button")
+	}
+	ctx.bindItems(extras)
+	win := ctx.NewWindow()
+	win.Title = title
+	win.OnClose = win.RemoveWindow
+	win.Closable = modal
+	win.Resizable = false
+	win.AutoSize = true
+	win.Movable = true
+	win.NoScroll = true
+	win.SetZone(HZoneCenter, VZoneMiddleTop)
+	// Add some breathing room so text doesn't hug the border
+	win.Padding = 8
+	win.BorderPad = 4
+
+	flow := ctx.NewColumn()
+	// Optional extra items (e.g., images) shown above the message
+	for _, ex := range extras {
+		if ex != nil {
+			flow.AddItem(ex)
+		}
+	}
+	if message != "" {
+		// Message (wrapped to a reasonable width)
+		uiScale := ctx.UIScale()
+		targetWidthPx := float64(520)
+		// Add horizontal padding on both sides to avoid right-edge clipping.
+		hpadPx := float64(24)
+		padUnits := float32(hpadPx / float64(uiScale))
+		// targetWidthUnits not used directly; inner width sets actual text width
+		// Match renderer size: (FontSize*uiScale)+2
+		facePx := float64(12*uiScale + 2)
+		var face text.Face
+		if src := ctx.FontSource(); src != nil {
+			face = &text.GoTextFace{Source: src, Size: facePx}
+		} else {
+			face = &text.GoTextFace{Size: facePx}
+		}
+		// Wrap to inner width (minus horizontal padding)
+		innerPx := targetWidthPx - 2*hpadPx
+		if innerPx < 50 {
+			innerPx = 50
+		}
+		_, lines := WrapText(message, face, innerPx)
+		wrapped := strings.Join(lines, "\n")
+		gm := face.Metrics()
+		lineHpx := float64(gm.HAscent + gm.HDescent)
+		if lineHpx < 14 {
+			lineHpx = 14
+		}
+		heightUnits := float32((lineHpx*float64(len(lines)) + 8) / float64(uiScale))
+		if heightUnits < 24 {
+			heightUnits = 24
+		}
+		txt, _ := ctx.NewText()
+		txt.Text = wrapped
+		txt.FontSize = 12
+		txt.SelectableText = true
+		// Slight width fudge to avoid right-edge clipping from rounding
+		fudgeUnits := float32(2.0 / float64(uiScale))
+		txt.Size = Point{X: float32(innerPx/float64(uiScale)) + fudgeUnits, Y: heightUnits}
+		txt.Position = Point{X: padUnits, Y: 0}
+		flow.AddItem(txt)
+	}
+
+	// Buttons row
+	btnRow := ctx.NewRow()
+	for index, b := range buttons {
+		btn, ev := ctx.NewButton()
+		btn.Text = b.Text
+		btn.Size = Point{X: 120, Y: 24}
+		if b.Width > 0 {
+			btn.Size.X = b.Width
+		}
+		if b.Color != nil {
+			btn.Color = *b.Color
+		}
+		if b.HoverColor != nil {
+			btn.HoverColor = *b.HoverColor
+		}
+		if b.Color != nil || b.HoverColor != nil {
+			btn.SetButtonColors(btn.Color, btn.HoverColor)
+		}
+		if b.Default || defaults == 0 && index == 0 {
+			win.DefaultButton = btn
+		}
+		if b.Cancel {
+			win.CancelButton = btn
+		}
+		action := b.Action
+		ev.Handle = func(ev UIEvent) {
+			if ev.Type == EventClick {
+				if action != nil {
+					action()
+				}
+				win.Close()
+			}
+		}
+		btnRow.AddItem(btn)
+	}
+	flow.AddItem(btnRow)
+
+	win.AddItem(flow)
+	win.AddWindow(false)
+	if modal {
+		win.MarkOpenModal()
+		if ctx.modalWindow() == win && win.DefaultButton != nil && (ctx.focusedItem == nil || ctx.focusedItem.Parent == btnRow) {
+			ctx.Focus(win.DefaultButton)
+		}
+	} else {
+		win.MarkOpen()
+	}
+	return win
+}

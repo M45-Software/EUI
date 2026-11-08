@@ -1,0 +1,26 @@
+Incremental document comparison, 2026-11-08
+Baseline editor: 29296bf implementation plus the same modal/form/gamepad additions in both trees.
+Only the document buffer/layout changes differ between timed trees.
+EditAtEnd: -benchtime=10x -count=5; WrappedResize: -benchtime=160x -count=3.
+Each resize sample covers the complete existing 260..419 pixel width sweep.
+Same Go caches/machine and Xvfb; the final comparison ran without concurrent tests/benchmarks.
+Timings measure CPU layout/edit work; they are not presented frame rate.
+
+go version go1.27.1 linux/amd64
+linux
+amd64
+0
+GOMAXPROCS: 32 (benchmark suffix)
+CPU: AMD Ryzen 9 7950X 16-Core Processor
+
+before/text_edit.go sha256 0e303872c94a443d8040ca2168b9b2264cb8ba39cec412a897340522137c425c
+before/text_composition.go sha256 f075d0b9561bdb3de7334801d083a0f5aeff5751287b5b65523bf657da283943
+before/text_edit_layout.go sha256 509704aca012749c36ef1c92ba239ae8e5edb8eec27470a2c7a4647a56553f16
+before/large_interface_benchmark_test.go sha256 0d3cac625114169a5afc1a58606086c699653a99e929f6c154594b6227266100
+after/text_edit.go sha256 47e394ef481c6c3dd92f8d0d5e4984fc65052d750816d58f7636bf152342b958
+after/text_composition.go sha256 02b11e1e9b29c3e87380bf45e99253ff1d4794d5a6f0c84793f84c89d3341df9
+after/text_edit_layout.go sha256 33f5301edfa3462b2ac047e7ec0598a895ca4516067903ae6e55fce972a16b73
+after/large_interface_benchmark_test.go sha256 0d3cac625114169a5afc1a58606086c699653a99e929f6c154594b6227266100
+after/text_buffer.go sha256 d54a718a1592effd49a982c29e3c5a18dd3cf1512b190fc6cc31905182c605c6
+after/text_wrap_cache.go sha256 f7eaf45d0df6767b69aeda97511881a1763989748ccc6a36a417cd2e73dfaca1
+after/text_line_navigation.go sha256 fcc3d1fe5d50e8faed8aa1a5d9178131a3950d46ae971f3299756c7aed0e1f73

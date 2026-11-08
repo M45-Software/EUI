@@ -1,0 +1,104 @@
+package eui
+
+import (
+	"image/color"
+	"strings"
+	"testing"
+
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
+	"golang.org/x/image/font/gofont/goregular"
+)
+
+func TestTooltipColorsRemainHighContrast(t *testing.T) {
+	background, foreground, border := tooltipColors()
+	if background != (color.RGBA{16, 18, 22, 255}) {
+		t.Fatalf("background = %v", background)
+	}
+	if foreground != (color.RGBA{255, 255, 255, 255}) {
+		t.Fatalf("foreground = %v", foreground)
+	}
+	if border != (color.RGBA{208, 212, 220, 255}) {
+		t.Fatalf("border = %v", border)
+	}
+}
+
+func TestTooltipTextIsTruncatedAndWrapped(t *testing.T) {
+	ctx := newTestContext(t)
+
+	if err := ctx.EnsureFontSource(goregular.TTF); err != nil {
+		t.Fatalf("font source: %v", err)
+	}
+	raw := strings.Repeat("tooltip words ", 30)
+	short := truncateTooltip(raw)
+	if len([]rune(short)) > tooltipMaxRunes {
+		t.Fatalf("tooltip has %d runes, max %d", len([]rune(short)), tooltipMaxRunes)
+	}
+	if !strings.HasSuffix(short, " ...") {
+		t.Fatalf("truncated tooltip = %q", short)
+	}
+
+	face := ctx.textFace(12)
+	wrapped := wrapTooltip(short, face, tooltipMaxWidth)
+	if !strings.Contains(wrapped, "\n") {
+		t.Fatalf("tooltip was not wrapped: %q", wrapped)
+	}
+	for _, line := range strings.Split(wrapped, "\n") {
+		if width, _ := text.Measure(line, face, 0); width > tooltipMaxWidth {
+			t.Fatalf("line width %f exceeds %d: %q", width, tooltipMaxWidth, line)
+		}
+	}
+
+	spacing := ctx.tooltipLineSpacing(face)
+	_, multiHeight := text.Measure(wrapped, face, spacing)
+	_, singleHeight := text.Measure(strings.Split(wrapped, "\n")[0], face, spacing)
+	if multiHeight <= singleHeight {
+		t.Fatalf("multiline tooltip height = %f, want greater than one-line height %f", multiHeight, singleHeight)
+	}
+}
+
+func TestTooltipAllowsDetailedDescriptions(t *testing.T) {
+	raw := strings.TrimSpace(strings.Repeat("useful detailed tooltip text ", 7))
+	if len([]rune(raw)) <= 96 {
+		t.Fatalf("test tooltip is only %d runes; it must exceed the old limit", len([]rune(raw)))
+	}
+	if got := truncateTooltip(raw); got != raw {
+		t.Fatalf("detailed tooltip was truncated:\n got: %q\nwant: %q", got, raw)
+	}
+}
+
+func TestTooltipWrapWidthFitsScreen(t *testing.T) {
+	ctx := newTestContext(t)
+
+	originalWidth := ctx.screenWidth
+	originalScale := ctx.uiScale
+	t.Cleanup(func() {
+		ctx.screenWidth = originalWidth
+		ctx.uiScale = originalScale
+	})
+
+	ctx.screenWidth = 240
+	ctx.uiScale = 1
+	want := float64(ctx.screenWidth - 2*tooltipPadding)
+	if got := ctx.tooltipWrapWidth(); got != want {
+		t.Fatalf("tooltip wrap width = %v, want %v", got, want)
+	}
+}
+
+func TestTooltipHiddenWhileMenuIsOpen(t *testing.T) {
+	ctx := newTestContext(t)
+
+	tooltip := &itemData{ctx: ctx, Tooltip: "details"}
+
+	if !shouldDrawTooltip(tooltip, nil, nil) {
+		t.Fatal("tooltip should draw when no menu is open")
+	}
+	if shouldDrawTooltip(tooltip, []openDropdown{{}}, nil) {
+		t.Fatal("tooltip should be hidden while a dropdown is open")
+	}
+	if shouldDrawTooltip(tooltip, nil, []*itemData{{ctx: ctx, Open: true}}) {
+		t.Fatal("tooltip should be hidden while a context menu is open")
+	}
+	if !shouldDrawTooltip(tooltip, nil, []*itemData{{ctx: ctx, Open: false}}) {
+		t.Fatal("a closed context menu should not hide the tooltip")
+	}
+}

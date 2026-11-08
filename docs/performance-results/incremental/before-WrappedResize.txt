@@ -1,0 +1,13 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Distortions81/EUI
+cpu: AMD Ryzen 9 7950X 16-Core Processor
+BenchmarkLargeInterface/Document/1000/WrappedResize-32         	     160	   5457246 ns/op	 4583638 B/op	   14378 allocs/op
+BenchmarkLargeInterface/Document/1000/WrappedResize-32         	     160	   3475355 ns/op	 2655427 B/op	    6105 allocs/op
+BenchmarkLargeInterface/Document/1000/WrappedResize-32         	     160	   3461256 ns/op	 2655427 B/op	    6105 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32        	     160	  82811741 ns/op	44312070 B/op	  134990 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32        	     160	  65863002 ns/op	27280624 B/op	   61006 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32        	     160	  64618966 ns/op	27280624 B/op	   61006 allocs/op
+ATTENTION: default value of option mesa_glthread overridden by environment.
+PASS
+ok  	github.com/Distortions81/EUI	41.345s

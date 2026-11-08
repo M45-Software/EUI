@@ -1,0 +1,60 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Distortions81/EUI
+cpu: AMD Ryzen 9 7950X 16-Core Processor
+BenchmarkLargeInterface/List/1000/Bounds-32  	    3121	     37645 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/Bounds-32  	    3102	     39311 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/Bounds-32  	    3218	     37690 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/ScrollTraversal-32         	    3889	     30343 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/ScrollTraversal-32         	    3890	     30619 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/ScrollTraversal-32         	    3841	     30685 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/1000/Resize-32                  	     472	    248807 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/1000/Resize-32                  	     487	    248114 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/1000/Resize-32                  	     486	    247722 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/1000/Theme-32                   	     168	    694114 ns/op	   95470 B/op	     908 allocs/op
+BenchmarkLargeInterface/List/1000/Theme-32                   	     180	    668905 ns/op	   95422 B/op	     908 allocs/op
+BenchmarkLargeInterface/List/1000/Theme-32                   	     166	    705984 ns/op	   95471 B/op	     908 allocs/op
+BenchmarkLargeInterface/Document/1000/WarmLayout-32          	    2460	     46146 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/WarmLayout-32          	    2590	     45948 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/WarmLayout-32          	    2594	     45943 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/CaretEnd-32            	    1278	     95058 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/CaretEnd-32            	    1280	     93115 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/CaretEnd-32            	    1233	     93704 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/1000/ColdLayout-32          	      25	   4476208 ns/op	 5463454 B/op	   22017 allocs/op
+BenchmarkLargeInterface/Document/1000/ColdLayout-32          	      28	   4472090 ns/op	 5463454 B/op	   22017 allocs/op
+BenchmarkLargeInterface/Document/1000/ColdLayout-32          	      26	   4428424 ns/op	 5463451 B/op	   22017 allocs/op
+BenchmarkLargeInterface/Document/1000/EditAtEnd-32           	      10	  10313254 ns/op	11509076 B/op	   44046 allocs/op
+BenchmarkLargeInterface/Document/1000/EditAtEnd-32           	      12	  10171837 ns/op	11508634 B/op	   44042 allocs/op
+BenchmarkLargeInterface/Document/1000/EditAtEnd-32           	      10	  10046571 ns/op	11508670 B/op	   44042 allocs/op
+BenchmarkLargeInterface/Document/1000/WrappedResize-32       	      10	  12096270 ns/op	13273894 B/op	   71918 allocs/op
+BenchmarkLargeInterface/Document/1000/WrappedResize-32       	      12	  10678100 ns/op	12303986 B/op	   66424 allocs/op
+BenchmarkLargeInterface/Document/1000/WrappedResize-32       	      12	  10244073 ns/op	12213868 B/op	   66019 allocs/op
+BenchmarkLargeInterface/List/10000/Bounds-32                 	     282	    424596 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/Bounds-32                 	     279	    427898 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/Bounds-32                 	     282	    430230 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/ScrollTraversal-32        	     334	    356678 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/ScrollTraversal-32        	     331	    360008 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/ScrollTraversal-32        	     330	    360490 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/List/10000/Resize-32                 	      43	   2758659 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/10000/Resize-32                 	      43	   2775752 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/10000/Resize-32                 	      43	   2762034 ns/op	     192 B/op	       2 allocs/op
+BenchmarkLargeInterface/List/10000/Theme-32                  	      19	   6286337 ns/op	   96102 B/op	     911 allocs/op
+BenchmarkLargeInterface/List/10000/Theme-32                  	      19	   6064312 ns/op	   95517 B/op	     908 allocs/op
+BenchmarkLargeInterface/List/10000/Theme-32                  	      18	   6083102 ns/op	   95864 B/op	     911 allocs/op
+BenchmarkLargeInterface/Document/10000/WarmLayout-32         	     225	    530338 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/WarmLayout-32         	     225	    530699 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/WarmLayout-32         	     225	    535405 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/CaretEnd-32           	     100	   1075186 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/CaretEnd-32           	     100	   1076968 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/CaretEnd-32           	     100	   1074348 ns/op	       0 B/op	       0 allocs/op
+BenchmarkLargeInterface/Document/10000/ColdLayout-32         	       2	  60986138 ns/op	55183704 B/op	  220024 allocs/op
+BenchmarkLargeInterface/Document/10000/ColdLayout-32         	       3	  48356721 ns/op	55183706 B/op	  220024 allocs/op
+BenchmarkLargeInterface/Document/10000/ColdLayout-32         	       2	  61826035 ns/op	55183704 B/op	  220024 allocs/op
+BenchmarkLargeInterface/Document/10000/EditAtEnd-32          	       1	 105018873 ns/op	116107560 B/op	  440064 allocs/op
+BenchmarkLargeInterface/Document/10000/EditAtEnd-32          	       1	 136647132 ns/op	116101968 B/op	  440057 allocs/op
+BenchmarkLargeInterface/Document/10000/EditAtEnd-32          	       1	 141438684 ns/op	116101952 B/op	  440057 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32      	       1	 155461560 ns/op	125427760 B/op	  660028 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32      	       1	 160660357 ns/op	125427760 B/op	  660028 allocs/op
+BenchmarkLargeInterface/Document/10000/WrappedResize-32      	       1	 119629740 ns/op	125427760 B/op	  660028 allocs/op
+PASS
+ok  	github.com/Distortions81/EUI	9.393s
