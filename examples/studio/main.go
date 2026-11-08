@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	eui "github.com/Distortions81/EUI"
+	eui "github.com/M45-Software/EUI"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"

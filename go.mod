@@ -1,4 +1,4 @@
-module github.com/Distortions81/EUI
+module github.com/M45-Software/EUI
 
 go 1.27.1
 

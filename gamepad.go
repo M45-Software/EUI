@@ -3,7 +3,7 @@ package eui
 import (
 	"math"
 
-	"github.com/Distortions81/EUI/internal/inputkeys"
+	"github.com/M45-Software/EUI/internal/inputkeys"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 

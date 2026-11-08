@@ -6,7 +6,7 @@ import (
 	"time"
 	"weak"
 
-	"github.com/Distortions81/EUI/renderpool"
+	"github.com/M45-Software/EUI/renderpool"
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/exp/textinput"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

@@ -1,7 +1,7 @@
 package eui
 
 import (
-	"github.com/Distortions81/EUI/renderpool"
+	"github.com/M45-Software/EUI/renderpool"
 	"image"
 	"image/color"
 	"runtime"

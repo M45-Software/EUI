@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"log"
 
-	"github.com/Distortions81/EUI"
+	"github.com/M45-Software/EUI"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )

@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	eui "github.com/Distortions81/EUI"
+	eui "github.com/M45-Software/EUI"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
