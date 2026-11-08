@@ -17,6 +17,13 @@ func (c Color) RGBA() (r, g, b, a uint32) {
 
 func (c Color) ToRGBA() color.RGBA { return color.RGBA(c) }
 
+// SliderRange highlights an interval on a slider track using slider values.
+type SliderRange struct {
+	Start float32
+	End   float32
+	Color Color
+}
+
 type windowData struct {
 	Title    string
 	Position point
@@ -25,7 +32,16 @@ type windowData struct {
 	zone *windowZone
 
 	snapAnchor       point
+	snapDragPosition point
 	snapAnchorActive bool
+	snapAnchorX      bool
+	snapAnchorY      bool
+
+	resizeSnapAnchorPosition point
+	resizeSnapAnchorSize     point
+	resizeSnapAnchorPart     dragType
+	resizeSnapAnchorX        bool
+	resizeSnapAnchorY        bool
 
 	Padding   float32
 	Margin    float32
@@ -76,6 +92,14 @@ type windowData struct {
 	Render *ebiten.Image
 	Dirty  bool
 
+	// titleRender keeps stable window chrome separate from the content cache.
+	// Frequently refreshed panes can redraw their contents without rebuilding
+	// title text, buttons, and dragbar marks every time.
+	titleRender      *ebiten.Image
+	titleRenderKey   windowTitleRenderKey
+	titleRenderValid bool
+	titleRenderCount uint64
+
 	// DeferRepaint lets large background panes share a per-frame repaint
 	// budget. Interaction, resizing and initial painting remain immediate.
 	DeferRepaint     bool
@@ -109,6 +133,10 @@ type windowData struct {
 	// either by user action or programmatically. The callback runs before the
 	// window is removed from the active list.
 	OnClose func()
+	// BeforeClose may veto closing by returning false, for example while an
+	// application asks what to do with unsaved edits. OnClose runs only after
+	// this callback allows the close.
+	BeforeClose func() bool
 
 	// OnOpen is an optional callback invoked when a closed window is opened.
 	// It runs before the first Refresh so clients can rebuild deferred content
@@ -126,6 +154,9 @@ type windowData struct {
 	// OnSearch is an optional callback invoked on every change of the search
 	// text when the search box is active.
 	OnSearch func(string)
+	// OnSearchNext advances a search result on Enter (backward on Shift+Enter)
+	// in the search box, or F3/Shift+F3 in the active window.
+	OnSearchNext func(backward bool)
 
 	// Opacity controls the overall window opacity when composited to the
 	// screen. Range [0,1], where 1 is fully opaque. Defaults to 1.
@@ -156,15 +187,20 @@ type itemData struct {
 	LineSpace  float32 //Multiplier, 1.0 = no gap between lines
 	ItemType   itemTypeData
 
-	Value      float32
-	MinValue   float32
-	MaxValue   float32
-	IntOnly    bool
-	HideValue  bool // Hide a slider's value caption when an adjacent field supplies it.
-	RadioGroup string
+	Value    float32
+	MinValue float32
+	MaxValue float32
+	Ranges   []SliderRange
+	// SliderKnobColor overrides the theme color for a slider's playhead/knob.
+	SliderKnobColor Color
+	IntOnly         bool
+	HideValue       bool // Hide a slider's value caption when an adjacent field supplies it.
+	RadioGroup      string
 
-	Hovered, Checked, Focused,
-	Disabled, Invisible bool
+	Hovered, Checked, Focused, Disabled bool
+	// Invisible removes the item and its descendants from drawing, input, and
+	// layout. Refresh the parent window after changing it.
+	Invisible   bool
 	Clicked     time.Time
 	FlowType    flowType
 	Scroll      point
@@ -182,6 +218,7 @@ type itemData struct {
 
 	// Preview menus retain their opening geometry until dismissed.
 	dropdownLayout *dropdownLayout
+	contextMenu    bool // Options start at the supplied anchor, without a dropdown field.
 
 	// HeaderCount marks the number of initial options that are shown as
 	// non-interactive headers in dropdowns/context menus. These indices are
@@ -195,6 +232,10 @@ type itemData struct {
 	OnHover func(int)
 
 	Fixed, Scrollable bool
+	// ConstrainToSize prevents a non-scrollable flow from expanding beyond its
+	// declared Size to accommodate children. On a control with an explicit
+	// width, it clips content instead of widening to fit its caption.
+	ConstrainToSize bool
 
 	ImageName string
 	Image     *ebiten.Image
@@ -203,6 +244,12 @@ type itemData struct {
 	SmoothImage bool
 	// TintImage draws a monochrome button icon in the current text color.
 	TintImage bool
+	// NoSurface keeps a button's hit target, icon, caption, and tooltip while
+	// suppressing its own background so it can sit inside another control.
+	NoSurface bool
+	// SelectionIndicator draws a thin accent strip inside a button's top edge.
+	// It follows the button's current style, including square and rounded corners.
+	SelectionIndicator bool
 	// ColorSwatch fills a button with WheelColor, keeping its caption readable.
 	ColorSwatch bool
 
@@ -220,25 +267,52 @@ type itemData struct {
 	TextColor, Color, HoverColor,
 	ClickColor, OutlineColor, DisabledColor, SelectedColor Color
 	// DisabledTextColor keeps disabled captions readable above DisabledColor.
-	// Zero preserves the legacy single-color disabled appearance.
+	// Zero uses DisabledColor for captions.
 	DisabledTextColor Color
 	ForceTextColor    bool
+	buttonColors      *buttonColorOverride
 
 	Action        func()
 	OnColorChange func(Color)
-	WheelColor    Color
-	TextPtr       *string
-	Underlines    []TextSpan
-	// Prediction is rendered after Text in the disabled text color. It is
-	// display-only and is not included in selection or cursor positions.
+	// OnTextZoom handles font-size steps from shortcut +/- or shortcut-wheel
+	// in an editable text control. A nil callback keeps normal editing/scrolling.
+	OnTextZoom                  func(steps int)
+	splitLeading, splitTrailing bool
+	WheelColor                  Color
+	TextPtr                     *string
+	wrappedLabel                *wrappedLabelLayout
+	textMeasure                 *textMeasureCache
+	Underlines                  []TextSpan
+	// Prediction is rendered after the primary caption in the disabled text
+	// color. It is display-only and is not included in selection or cursor positions.
 	Prediction string
-	SecretText string
-	HideText   bool
-	CursorPos  int
+	// CompleteText returns an optional suffix for a single-line input. The
+	// suffix is shown at the end of an unselected draft and accepted with Tab.
+	// It never runs for passwords or multiline editors.
+	CompleteText func(string) string
+	SecretText   string
+	HideText     bool
+	CursorPos    int
 	// SelectableText allows text to be drag-selected and copied. EditableText is
 	// required separately for ITEM_TEXT values that accept keyboard changes.
-	SelectableText         bool
-	EditableText           bool
+	SelectableText bool
+	EditableText   bool
+	// ExternalTextEditing keeps pointer focus, cursor placement, and selection
+	// in EUI while leaving keyboard mutations to the embedding application.
+	ExternalTextEditing bool
+	// Multiline allows Enter to insert a newline. AcceptTab inserts tabs instead
+	// of moving focus; Shift+Tab removes indentation from selected lines.
+	// WordWrap soft-wraps multiline text to the viewport without changing Text.
+	WordWrap               bool
+	Multiline              bool
+	AcceptTab              bool
+	textEdit               *textEditState
+	textHighlighter        TextHighlighter
+	textSwatchProvider     TextHighlighter
+	textSwatchClick        func(TextColorSpan)
+	hoverDismissRect       *rect
+	textDrawOrigin         point
+	textDrawSize           point
 	SelectStart, SelectEnd int
 	selecting              bool
 	// OnURLClick is called when a HTTP(S) URL in a text item is clicked.
@@ -252,6 +326,9 @@ type itemData struct {
 	ActiveTab int
 	// TabColumns limits the number of tabs per row. Fixed flows also wrap at their width.
 	TabColumns int
+	// TabWidth gives every tab the same minimum logical width. Zero sizes tabs
+	// from their labels.
+	TabWidth float32
 	// TabRowOffset indents every other wrapped tab row in logical pixels.
 	TabRowOffset float32
 
@@ -310,9 +387,11 @@ type flowType int
 const (
 	FLOW_HORIZONTAL = iota
 	FLOW_VERTICAL
-
 	FLOW_HORIZONTAL_REV
 	FLOW_VERTICAL_REV
+	// FLOW_OVERLAY positions every child from the same origin. Child Position
+	// values place controls within the shared container rectangle.
+	FLOW_OVERLAY
 )
 
 type alignType int

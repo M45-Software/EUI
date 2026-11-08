@@ -181,18 +181,8 @@ func TestUnfilledControlUsesWindowContrast(t *testing.T) {
 	}
 }
 
-func TestRetiredThemeNamesAndLocalOverrides(t *testing.T) {
+func TestCustomThemesAndTemplateFiltering(t *testing.T) {
 	isolateThemeTest(t)
-	for old, replacement := range paletteAliases {
-		if err := LoadTheme(old); err != nil || CurrentThemeName() != replacement {
-			t.Fatalf("palette %s -> %s: %v", old, CurrentThemeName(), err)
-		}
-	}
-	for old, replacement := range styleAliases {
-		if err := LoadStyle(old); err != nil || CurrentStyleName() != replacement {
-			t.Fatalf("style %s -> %s: %v", old, CurrentStyleName(), err)
-		}
-	}
 	if err := LoadTheme("NeonNight"); err != nil || CurrentThemeName() != "NeonNight" {
 		t.Fatalf("NeonNight lost its identity: %v", err)
 	}
@@ -210,22 +200,32 @@ func TestRetiredThemeNamesAndLocalOverrides(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, name := range names {
-			if name == "Example" || paletteAliases[name] != "" || styleAliases[name] != "" {
-				t.Errorf("template or retired name %s appeared in selector", name)
+			if name == "Example" {
+				t.Errorf("template name %s appeared in selector", name)
 			}
 		}
 	}
-	if err := os.WriteFile(filepath.Join(themeDirectory, "palettes", "Black.json"), []byte(`{"Window":{"BGColor":"#123456ff"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(themeDirectory, "palettes", "CustomPalette.json"), []byte(`{"Window":{"BGColor":"#123456ff"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := LoadTheme("Black"); err != nil || CurrentThemeName() != "Black" || currentTheme.Window.BGColor != NewColor(18, 52, 86, 255) {
-		t.Fatalf("custom old-name palette did not take precedence: %v", err)
+	if err := LoadTheme("CustomPalette"); err != nil || CurrentThemeName() != "CustomPalette" || currentTheme.Window.BGColor != NewColor(18, 52, 86, 255) {
+		t.Fatalf("custom palette did not load: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(themeDirectory, "styles", "RoundFlat.json"), []byte(`{"TextPadding":19}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(themeDirectory, "styles", "CustomStyle.json"), []byte(`{"TextPadding":19}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := LoadStyle("RoundFlat"); err != nil || CurrentStyleName() != "RoundFlat" || currentStyle.TextPadding != 19 {
-		t.Fatalf("custom old-name style did not take precedence: %v", err)
+	if err := LoadStyle("CustomStyle"); err != nil || CurrentStyleName() != "CustomStyle" || currentStyle.TextPadding != 19 {
+		t.Fatalf("custom style did not load: %v", err)
+	}
+}
+
+func TestUnknownStyleFallsBackToDefault(t *testing.T) {
+	isolateThemeTest(t)
+	if err := LoadStyle("MissingStyle"); err != nil {
+		t.Fatal(err)
+	}
+	if got := CurrentStyleName(); got != "Default" {
+		t.Fatalf("unknown style resolved to %q, want Default", got)
 	}
 }
 

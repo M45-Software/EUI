@@ -12,8 +12,8 @@ import (
 
 // Run alone because Ebitengine permits one RunGame call per process.
 func TestTooltipPreservesButtonCaptionPixels(t *testing.T) {
-	if os.Getenv("GOTHOOM_TOOLTIP_RENDER_TEST") == "" {
-		t.Skip("set GOTHOOM_TOOLTIP_RENDER_TEST=1 for pixel comparison")
+	if os.Getenv("EUI_TOOLTIP_RENDER_TEST") == "" {
+		t.Skip("set EUI_TOOLTIP_RENDER_TEST=1 for pixel comparison")
 	}
 	if err := EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)

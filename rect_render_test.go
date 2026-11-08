@@ -14,8 +14,8 @@ import (
 
 // Run alone: Ebitengine permits only one RunGame call per process.
 func TestRenderPixelAlignedRect(t *testing.T) {
-	if os.Getenv("GOTHOOM_RENDER_RECT_TEST") == "" {
-		t.Skip("set GOTHOOM_RENDER_RECT_TEST=1 to compare rectangle pixels")
+	if os.Getenv("EUI_RENDER_RECT_TEST") == "" {
+		t.Skip("set EUI_RENDER_RECT_TEST=1 to compare rectangle pixels")
 	}
 	g := &rectRenderGame{}
 	if err := ebiten.RunGame(g); err != nil {

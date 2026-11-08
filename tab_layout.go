@@ -20,7 +20,17 @@ func tabRowHeight(item, style *itemData) float32 {
 // width; TabColumns also imposes a maximum number of tabs per row.
 // Drawing, content bounds, and hit targets all use these same rectangles.
 func layoutTabs(item, style *itemData) ([]rect, point) {
-	rects := make([]rect, len(item.Tabs))
+	return layoutTabsInto(nil, item, style)
+}
+
+// layoutTabsInto uses caller-owned rectangle storage without caching geometry.
+// Labels, fonts, scale, and available width are still measured on every call.
+func layoutTabsInto(rects []rect, item, style *itemData) ([]rect, point) {
+	if cap(rects) < len(item.Tabs) {
+		rects = make([]rect, len(item.Tabs))
+	} else {
+		rects = rects[:len(item.Tabs)]
+	}
 	return rects, measureTabLayout(item, style, rects)
 }
 
@@ -42,6 +52,9 @@ func measureTabLayout(item, style *itemData, rects []rect) point {
 	for i, tab := range item.Tabs {
 		tw, _ := text.Measure(tab.Name, itemFace(tab, size), 0)
 		w := max(float32(math.Ceil(tw))+padding, 40*uiScale)
+		if item.TabWidth > 0 {
+			w = max(w, item.TabWidth*uiScale)
+		}
 		if columns > 0 && ((item.TabColumns > 0 && columns >= item.TabColumns) || (limit > 0 && x+w > limit)) {
 			row++
 			columns = 0

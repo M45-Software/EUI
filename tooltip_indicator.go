@@ -14,6 +14,11 @@ func (item *itemData) tooltipIndicatorRect(offset, size point) rect {
 	if item.ColorSwatch || item.Tooltip == "" || item.ParentWindow == nil || !item.ParentWindow.ShowTooltipIndicators {
 		return rect{}
 	}
+	// Unlabeled sliders have no caption beside which to place a marker. Keep
+	// their hover help without drawing an icon over the slider track.
+	if item.ItemType == ITEM_SLIDER && item.Label == "" {
+		return rect{}
+	}
 	textSize := item.FontSize*uiScale + 2
 	face := itemFace(item, textSize)
 	caption := item.Text
@@ -44,6 +49,10 @@ func (item *itemData) tooltipIndicatorRect(offset, size point) rect {
 		startX = offset.X + size.X/2 - 9*uiScale - textWidth/2
 	}
 	x := min(startX+textWidth+6*uiScale, offset.X+size.X-diameter-2*uiScale)
+	if item.ItemType == ITEM_INPUT && item.Label == "" {
+		// Editable text scrolls independently; keep help outside that viewport.
+		x = offset.X + size.X - diameter - 2*uiScale
+	}
 	y := offset.Y + (height-diameter)/2
 	return rect{X0: x, Y0: y, X1: x + diameter, Y1: y + diameter}
 }

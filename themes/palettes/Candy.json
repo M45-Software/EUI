@@ -13,7 +13,17 @@
     "disabled": "#ebdbe2ff",
     "disabledtext": "#866277ff",
     "alternate": "#f7e2ecff",
-    "shadow": "#743e6055"
+    "shadow": "#743e6055",
+    "disabledtoggle": "#99808fff",
+    "disabledtoggletext": "#46333eff"
+  },
+  "Syntax": {
+    "Comments": "#2d692dff",
+    "Strings": "#914114ff",
+    "Keywords": "#2346aaff",
+    "Numbers": "#733791ff",
+    "Variables": "#006473ff",
+    "Bindings": "#8c3769ff"
   },
   "Window": {
     "Padding": 8,
@@ -57,9 +67,9 @@
     "HoverColor": "hover",
     "ClickColor": "accent",
     "OutlineColor": "outline",
-    "DisabledColor": "disabled",
+    "DisabledColor": "disabledtoggle",
     "SelectedColor": "highlight",
-    "DisabledTextColor": "disabledtext"
+    "DisabledTextColor": "disabledtoggletext"
   },
   "Radio": {
     "TextColor": "text",
@@ -67,9 +77,9 @@
     "HoverColor": "hover",
     "ClickColor": "accent",
     "OutlineColor": "outline",
-    "DisabledColor": "disabled",
+    "DisabledColor": "disabledtoggle",
     "SelectedColor": "highlight",
-    "DisabledTextColor": "disabledtext"
+    "DisabledTextColor": "disabledtoggletext"
   },
   "Input": {
     "TextColor": "text",

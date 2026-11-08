@@ -8,6 +8,42 @@ import (
 	"golang.org/x/image/font/gofont/goregular"
 )
 
+func TestSelectedTabIndicatorMatchesTabBoundsAndSurface(t *testing.T) {
+	previousScale := uiScale
+	uiScale = 1
+	t.Cleanup(func() { uiScale = previousScale })
+	if err := EnsureFontSource(goregular.TTF); err != nil {
+		t.Fatalf("font source: %v", err)
+	}
+
+	theme := *baseTheme
+	theme.Tab.Color = NewColor(20, 30, 40, 255)
+	theme.Tab.SelectedColor = NewColor(40, 50, 60, 255)
+	theme.Tab.ClickColor = NewColor(70, 80, 90, 255)
+	theme.Tab.Border = 0
+	theme.Tab.ActiveOutline = true
+	flow := &itemData{
+		ItemType:      ITEM_FLOW,
+		FlowType:      FLOW_VERTICAL,
+		Fixed:         true,
+		Filled:        true,
+		Size:          point{X: 160, Y: 100},
+		Theme:         &theme,
+		ActiveOutline: true,
+		ActiveTab:     1,
+		Tabs:          []*itemData{{Name: "First", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}, {Name: "Second", ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL}},
+	}
+	layout, _ := layoutTabs(flow, &theme.Tab)
+	active := layout[flow.ActiveTab]
+	wantIndicator := rect{X0: active.X0, Y0: active.Y0, X1: active.X1, Y1: active.Y0 + 3}
+	if got := tabIndicatorClip(point{X: active.X0, Y: active.Y0}, point{X: active.X1 - active.X0, Y: 24}); got != wantIndicator {
+		t.Fatalf("indicator clip = %v, want tab-top clip %v", got, wantIndicator)
+	}
+	if got, want := tabSurfaceColor(flow.Tabs[flow.ActiveTab], flow.ActiveTab, flow.ActiveTab, &theme.Tab), NewColor(43, 53, 63, 255); got != want {
+		t.Fatalf("selected tab background = %v, want lightly accented surface %v", got, want)
+	}
+}
+
 func TestTabRenderingUsesThemeFontAndSurfaceColor(t *testing.T) {
 	previousScale := uiScale
 	uiScale = 1
@@ -206,6 +242,36 @@ func TestStaggeredTabsReserveSpaceAndHandleSecondRowClicks(t *testing.T) {
 	}
 }
 
+func TestTabWidthAlignsWrappedRows(t *testing.T) {
+	previousScale := uiScale
+	t.Cleanup(func() { uiScale = previousScale })
+	if err := EnsureFontSource(goregular.TTF); err != nil {
+		t.Fatal(err)
+	}
+	for _, scale := range []float32{1, 1.5, 2} {
+		uiScale = scale
+		flow := &itemData{
+			ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL,
+			TabColumns: 3, TabWidth: 100,
+			Tabs: []*itemData{
+				{Name: "One"}, {Name: "Two"}, {Name: "Three"},
+				{Name: "Four"}, {Name: "Five"}, {Name: "Six"},
+			},
+		}
+		layout, _ := layoutTabs(flow, flow.themeStyle())
+		for i, bounds := range layout {
+			if got, want := bounds.X1-bounds.X0, 100*scale; got != want {
+				t.Fatalf("tab %d width at %.1fx = %.1f, want %.1f", i, scale, got, want)
+			}
+		}
+		for column := 0; column < 3; column++ {
+			if layout[column].X0 != layout[column+3].X0 {
+				t.Fatalf("column %d is not aligned at %.1fx: %.1f, %.1f", column, scale, layout[column].X0, layout[column+3].X0)
+			}
+		}
+	}
+}
+
 func TestTabLabelsFitFixedPanels(t *testing.T) {
 	previousScale := uiScale
 	t.Cleanup(func() { uiScale = previousScale })
@@ -240,6 +306,56 @@ func TestTabLabelsFitFixedPanels(t *testing.T) {
 			}
 			if size.Y != flow.contentBounds().Y {
 				t.Fatal("content did not reserve tab rows")
+			}
+		}
+	}
+}
+
+func TestTabLayoutScratchTracksChangingTabsAndKeepsHitGeometry(t *testing.T) {
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+	oldScale := uiScale
+	uiScale = 1
+	t.Cleanup(func() { uiScale = oldScale })
+	flow := &itemData{ItemType: ITEM_FLOW, FlowType: FLOW_VERTICAL, Fixed: true, Size: point{X: 240, Y: 400}}
+	win := NewWindow()
+	win.Open = true
+	win.Size = point{X: 300, Y: 450}
+	win.AddItem(flow)
+	screen := ebiten.NewImage(400, 500)
+	t.Cleanup(screen.Deallocate)
+	var storage [2]rect
+	rects := storage[:0]
+	var dropdowns []openDropdown
+	for _, names := range [][]string{{"One", "Two"}, {"Display", "Text", "Audio", "Controls"}, {"Files"}, {}, {"A renamed tab", "More"}} {
+		flow.Tabs = flow.Tabs[:0]
+		for _, name := range names {
+			flow.Tabs = append(flow.Tabs, &itemData{Name: name, ItemType: ITEM_FLOW})
+		}
+		flow.ActiveTab = 0
+		previous := rects[:cap(rects)]
+		var size point
+		rects, size = layoutTabsInto(rects, flow, flow.themeStyle())
+		if len(rects) != len(names) || size != measureTabLayout(flow, flow.themeStyle(), nil) {
+			t.Fatalf("layout retained stale tabs or bounds for %v", names)
+		}
+		if len(rects) > 0 && len(rects) <= len(previous) && &rects[0] != &previous[0] {
+			t.Fatal("layout replaced sufficient caller storage")
+		}
+		if len(names) == 0 {
+			continue
+		}
+		offset, base := point{X: 10, Y: 20}, point{X: 30, Y: 40}
+		flow.drawFlows(win, nil, offset, base, rect{X1: 400, Y1: 500}, screen, &dropdowns)
+		for i, tab := range flow.Tabs {
+			want := rectAdd(rects[i], pointAdd(offset, base))
+			if tab.DrawRect != want {
+				t.Fatalf("tab %d hit bounds = %+v, want %+v", i, tab.DrawRect, want)
+			}
+			center := point{X: (want.X0 + want.X1) / 2, Y: (want.Y0 + want.Y1) / 2}
+			if !flow.clickFlows(center, true) || flow.ActiveTab != i {
+				t.Fatalf("tab %d click selected %d after changing tabs", i, flow.ActiveTab)
 			}
 		}
 	}

@@ -11,8 +11,8 @@ import (
 )
 
 func TestRenderRecycledManagedTarget(t *testing.T) {
-	if os.Getenv("GOTHOOM_RENDER_POOL_TEST") == "" {
-		t.Skip("set GOTHOOM_RENDER_POOL_TEST=1 for rendered recycling checks")
+	if os.Getenv("EUI_RENDER_POOL_TEST") == "" {
+		t.Skip("set EUI_RENDER_POOL_TEST=1 for rendered recycling checks")
 	}
 	g := &recycleGame{pool: Pool{MaxFreeBytes: 1 << 20}}
 	if err := ebiten.RunGame(g); err != nil {

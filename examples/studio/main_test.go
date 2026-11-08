@@ -12,6 +12,9 @@ func findItem(items []*eui.ItemData, text string) *eui.ItemData {
 		if item.Text == text || item.Label == text {
 			return item
 		}
+		if found := findItem(item.Tabs, text); found != nil {
+			return found
+		}
 		if found := findItem(item.Contents, text); found != nil {
 			return found
 		}
@@ -19,7 +22,7 @@ func findItem(items []*eui.ItemData, text string) *eui.ItemData {
 	return nil
 }
 func TestStudioControlsDriveSceneAndTheme(t *testing.T) {
-	s := &studio{speed: .75, count: 48, playing: true, grid: true, trails: true, sceneName: "Test orbit", palette: "AccentDark", style: "Breeze"}
+	s := &studio{speed: .75, count: 48, playing: true, grid: true, trails: true, sceneName: "Test orbit", palette: "AccentDark", style: "Default"}
 	if err := s.build(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,5 +79,43 @@ func TestStudioControlsDriveSceneAndTheme(t *testing.T) {
 	find("Scene info").Handler.Emit(eui.UIEvent{Type: eui.EventClick})
 	if len(eui.Windows()) != before+1 {
 		t.Fatal("scene info did not open a dialog")
+	}
+}
+
+func TestStudioEditorHistoryAndWrapping(t *testing.T) {
+	s := &studio{speed: .75, count: 48, playing: true, sceneName: "Editor test", palette: "AccentDark", style: "Default", initialTab: "Editor"}
+	if err := s.build(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, w := range append([]*eui.WindowData(nil), eui.Windows()...) {
+			w.RemoveWindow()
+		}
+		s.canvas.Deallocate()
+	})
+	if s.notebookTabs.Tabs[s.notebookTabs.ActiveTab].Name != "Editor" {
+		t.Fatal("editor tab was not selected")
+	}
+	original := s.editor.Text
+	s.editor.ReplaceText("changed document")
+	invoke := func(name string, event eui.UIEvent) {
+		t.Helper()
+		item := findItem(s.notebookTabs.Tabs, name)
+		if item == nil {
+			t.Fatalf("missing %s", name)
+		}
+		item.Handler.Emit(event)
+	}
+	invoke("Undo", eui.UIEvent{Type: eui.EventClick})
+	if s.editor.Text != original {
+		t.Fatal("Undo toolbar did not restore document")
+	}
+	invoke("Redo", eui.UIEvent{Type: eui.EventClick})
+	if s.editor.Text != "changed document" {
+		t.Fatal("Redo toolbar did not restore edit")
+	}
+	invoke("Wrap lines", eui.UIEvent{Type: eui.EventCheckboxChanged, Checked: true})
+	if !s.editor.WordWrap {
+		t.Fatal("wrap checkbox did not enable wrapping")
 	}
 }

@@ -14,7 +14,8 @@ from the running program.*
 
 ## Try the studio
 
-Requires **Go 1.26.6** and the usual Ebitengine platform dependencies.
+Requires **Go 1.27.1**. EUI targets **Ebitengine 2.10.2**; desktop builds support
+`CGO_ENABLED=0` and need the usual display/graphics runtime libraries.
 This repository is private; use a GitHub account with access.
 
 ```sh
@@ -28,6 +29,7 @@ go run ./examples/studio
 - Change particle count, orbit speed, grid, and trails in the live canvas.
 - Pause, resume, reset, and rename the scene.
 - Open a dialog and select its text; explore the notebook's tabs.
+- Edit highlighted Go text in the **Editor** tab, undo/redo, and toggle word wrapping.
 
 Try a different starting look:
 
@@ -105,10 +107,10 @@ for the `main` function and window setup.
 
 | Area | Features |
 | --- | --- |
-| Layout | Rows, columns, sections, tabs, scrolling, anchoring, automatic sizing |
+| Layout | Rows, columns, overlays, wrapped labels, tabs, scrolling, content sizing |
 | Windows | Movement, resizing, snapping, search, shadows, cached rendering |
-| Controls | Buttons, checkboxes, radio buttons, sliders, dropdowns, progress bars |
-| Text | Inputs, selection, wrapping, URL callbacks, cached scrolling text windows |
+| Controls | Buttons, split buttons, checkboxes, radio buttons, sliders, dropdowns, progress bars |
+| Text | Single/multiline editing, undo/redo, search, highlighting, wrapping, cached text windows |
 | Dialogs | Message/action popups, color pickers, context menus, tooltips |
 | Appearance | Embedded fonts, 12 palettes, 6 styles, live accents, display scaling |
 | Rendering | Ebitengine images, reusable render targets, repaint coalescing |
@@ -116,14 +118,72 @@ for the `main` function and window setup.
 Widget constructors return an item and an event handler when you need detailed
 control. The convenience builders (`NewColumn`, `NewRow`, `NewLabel`, and
 `NewActionButton`) keep common layouts short. Set `Size` for explicit dimensions,
-and use `Fixed` / `Scrollable` for bounded viewports.
+and use `Fixed` / `Scrollable` for bounded viewports. Set `ConstrainToSize` when
+a non-scrollable control must stay within its declared size. `NewWrappedLabel`
+reflows paragraphs to a logical width, and `LayoutWindowBody` reserves space for
+fixed controls around a scrolling body.
+
+## Editing text
+
+Use `NewInput` for a single line, or `NewTextArea` for a scrolling document:
+
+```go
+editor, events := eui.NewTextArea()
+editor.Size = eui.Point{X: 480, Y: 260}
+editor.Text = "First line\nSecond line"
+editor.AcceptTab = true
+editor.SetWordWrap(true)
+events.Handle = func(event eui.UIEvent) {
+    if event.Type == eui.EventInputChanged {
+        draft = event.Text
+    }
+}
+win.AddItem(editor)
+```
+
+Both support selection replacement, word/line navigation, held-key repeat,
+grapheme-aware deletion, and bounded undo/redo history. Use Ctrl+A/X/C/V/Z on
+Windows and Linux, or Command on macOS. Password fields do not copy, cut, or
+retain undo history. Multiline controls scroll the caret into view; optional
+word wrapping changes the display without modifying the source text.
+
+`ReplaceText` applies a transformation as one undoable edit. `Undo`, `Redo`,
+`CanUndo`, and `CanRedo` support toolbar actions. `FindText` selects and reveals
+a literal match. `SetTextHighlighter` accepts rune-indexed `TextColorSpan` ranges;
+`CurrentSyntaxColors` supplies the active palette's editor colors. Call
+`RefreshTextHighlighting` when your highlighter's external inputs change.
+`SetTextColorSwatches` adds clickable color previews over source ranges.
+
+For application-owned chat history and completion, set `ExternalTextEditing`.
+Use `FocusedTextInput` to reserve editing keys from game shortcuts. IME
+composition UI and file persistence are supplied by the embedding application.
+See Studio's **Editor** tab for a complete example:
+
+```sh
+go run ./examples/studio -tab Editor
+```
+
+![Studio editor with highlighted Go text and undo/redo controls](docs/studio-editor.png)
+
+## Updating controls
+
+Use `UpdateText` for label changes: it repaints and reflows the containing
+window. Direct field assignments remain available; call `win.Refresh()` after
+changing layout or appearance. `SetWrappedText` preserves original paragraphs
+when updating a wrapped label. Call `SetWordWrap` to change editor wrapping.
+
+`BeforeClose` may return false to keep a window open while resolving unsaved
+changes. Closing clears its input state and releases cached render targets,
+including tab contents. `RemoveWindow` retires it; detached items release their
+cached targets and can be attached again. Images supplied by the application
+remain the application's responsibility.
 
 ## Themes included
 
 **Palettes:** AccentDark, AccentLight, Arcade, Candy, Coffee, Dusk, Forest,
 HighContrast, Midnight, NeonNight, Paper, SeaGlass.
 
-**Styles:** Borderless, Breeze, Flat, HighContrast, Outline, Rounded.
+**Styles:** Borderless, Default, Flat, HighContrast, Outline, Rounded.
 
 Example JSON templates are included alongside the built-ins. All original
 palettes and styles from goThoom are preserved in [`themes`](themes/README.md).
@@ -158,37 +218,49 @@ preserving custom fonts installed earlier with `SetFontSource` and
 
 ## Develop and verify
 
-On Debian/Ubuntu, install the native build and headless test dependencies:
+On Debian/Ubuntu, install graphics runtime and headless test dependencies:
 
 ```sh
-sudo apt-get install build-essential pkg-config libgl1-mesa-dev xorg-dev xvfb
+sudo apt-get install libgl1 libx11-6 libxcursor1 libxi6 libxrandr2 libxxf86vm1 xvfb
 ```
 
 With a desktop display:
 
 ```sh
-go test ./...
-go vet ./...
-go build ./...
+CGO_ENABLED=0 go test -tags 'integration test' ./...
+CGO_ENABLED=0 go vet ./...
+CGO_ENABLED=0 go build ./...
 ```
 
 On headless Linux, prefix test or example commands with `xvfb-run -a`.
-GitHub Actions runs the same tests, vet, and build checks.
+GitHub Actions runs the tagged tests, vet, build, Studio screenshots, and the
+text-editor rendering regression. Render tests that invoke Ebitengine run in
+separate processes. To check editor pixels locally:
+
+```sh
+EUI_TEXT_EDIT_CAPTURE=/tmp/eui-editor.png xvfb-run -a go test -run '^TestRenderTextEditing$' .
+```
 
 Regenerate the README images from the real application:
 
 ```sh
 xvfb-run -a go run ./examples/studio -screenshot docs/studio.png
 xvfb-run -a go run ./examples/studio -theme Paper -style Rounded -screenshot docs/studio-light.png
+xvfb-run -a go run ./examples/studio -tab Editor -screenshot docs/studio-editor.png
 ```
 
 The screenshot option writes one frame and exits. No image editor is needed.
 More focused theme visual checks are documented in [`themes/README.md`](themes/README.md).
 
+For testing a local library change in goThoom and switching the client to a
+pinned standalone dependency, see [client integration](docs/client-integration.md).
+
 ## Origin and license
 
 EUI was extracted from [goThoom](https://github.com/Distortions81/goThoom), where it
 was developed for a real desktop game client. This repository is independent;
-goThoom continues using its own local EUI copy.
+The standalone library also includes the reusable editor, layout, and rendering
+work developed in that client. Client integration is checked against a local
+module replacement before pinning a published EUI revision.
 
 [MIT licensed](LICENSE). No Clan Lord game assets are included.

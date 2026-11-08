@@ -10,8 +10,8 @@ import (
 
 // Run alone; pixel reads require Ebitengine's game loop.
 func TestRenderWindowEffects(t *testing.T) {
-	if os.Getenv("GOTHOOM_RENDER_WINDOW_EFFECTS") == "" {
-		t.Skip("set GOTHOOM_RENDER_WINDOW_EFFECTS=1")
+	if os.Getenv("EUI_RENDER_WINDOW_EFFECTS") == "" {
+		t.Skip("set EUI_RENDER_WINDOW_EFFECTS=1")
 	}
 	isolateThemeTest(t)
 	old := windowShadows

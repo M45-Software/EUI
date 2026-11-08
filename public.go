@@ -27,7 +27,19 @@ func PointerCursorClaimed() bool { return cursorShape != ebiten.CursorShapeDefau
 func WindowSnapping() bool { return windowSnapping }
 
 // SetWindowSnapping enables or disables window snapping.
-func SetWindowSnapping(enabled bool) { windowSnapping = enabled }
+func SetWindowSnapping(enabled bool) {
+	windowSnapping = enabled
+	if enabled {
+		return
+	}
+	for _, win := range windows {
+		win.snapAnchorActive = false
+		win.snapAnchorX = false
+		win.snapAnchorY = false
+		win.resizeSnapAnchorX = false
+		win.resizeSnapAnchorY = false
+	}
+}
 
 // MiddleClickMove reports whether middle-click window dragging is enabled.
 func MiddleClickMove() bool { return middleClickMove }
@@ -277,9 +289,37 @@ func SubtleAlternateRowColor() Color {
 	return Color{R: blend(bg.R), G: blend(bg.G), B: blend(bg.B), A: 255}
 }
 
+// HasTextSelection reports whether Copy is handled by a selected UI text range.
+func HasTextSelection() bool {
+	return selectedTextItem != nil && selectedTextItem.SelectedText() != ""
+}
+
+// FocusedTextInput returns the visible, enabled text control with keyboard
+// focus, or nil. Hosts can use this to reserve editing keys from game hotkeys.
+func FocusedTextInput() *ItemData {
+	if !itemAcceptsTextEditing(focusedItem) || focusedItem.isInvisible() ||
+		focusedItem.ParentWindow != nil && !focusedItem.ParentWindow.Open {
+		return nil
+	}
+	return focusedItem
+}
+
+// OpenSearch shows and focuses this window's titlebar search box.
+func (win *windowData) OpenSearch() {
+	if win == nil || !win.Open || !win.Searchable {
+		return
+	}
+	if focusedItem != nil {
+		ClearFocus(focusedItem)
+	}
+	win.searchOpen = true
+	activeSearch = win
+	win.markDirty()
+}
+
 // ClearFocus removes focus from the provided item if it is currently focused.
 func ClearFocus(it *ItemData) {
-	if focusedItem == it {
+	if it != nil && focusedItem == it {
 		focusedItem.Focused = false
 		focusedItem.markDirty()
 		focusedItem = nil
@@ -289,7 +329,7 @@ func ClearFocus(it *ItemData) {
 // Focus gives keyboard focus to a text input. It is useful for transient
 // keyboard-driven windows that should be ready for typing as soon as opened.
 func Focus(it *ItemData) {
-	if it == nil || !itemAcceptsTextEditing(it) {
+	if it == nil || it.isInvisible() || !itemAcceptsTextEditing(it) {
 		return
 	}
 	if focusedItem != nil && focusedItem != it {
@@ -297,9 +337,15 @@ func Focus(it *ItemData) {
 		focusedItem.markDirty()
 	}
 	focusedItem = it
-	it.CursorPos = len([]rune(it.Text))
+	activeSearch = nil
 	it.Focused = true
-	it.markDirty()
+	if itemHandlesTextEditing(it) {
+		it.editor().group = ""
+		it.editMove(len([]rune(it.editText())), false)
+	} else {
+		it.CursorPos = len([]rune(it.Text))
+		it.markDirty()
+	}
 }
 
 // SetActiveSearchForTest sets the active search window for tests.

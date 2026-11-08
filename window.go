@@ -52,6 +52,11 @@ func (target *windowData) deallocate() {
 		releaseUIRenderTarget(target.Render)
 		target.Render = nil
 	}
+	if target.titleRender != nil {
+		releaseUIRenderTarget(target.titleRender)
+		target.titleRender = nil
+		target.titleRenderValid = false
+	}
 	for _, item := range target.Contents {
 		item.deallocate()
 	}
@@ -59,6 +64,9 @@ func (target *windowData) deallocate() {
 
 // deallocate releases cached render images for the item and its children.
 func (item *itemData) deallocate() {
+	if item == nil {
+		return
+	}
 	if item.ItemType == ITEM_COLORWHEEL && item.Image != nil {
 		releaseUIRenderTarget(item.Image)
 		item.Image = nil
@@ -70,6 +78,32 @@ func (item *itemData) deallocate() {
 	for _, child := range item.Contents {
 		child.deallocate()
 	}
+	for _, tab := range item.Tabs {
+		tab.deallocate()
+	}
+}
+
+// clearInteraction retires input state before callbacks can open other windows.
+func (target *windowData) clearInteraction() {
+	for _, item := range target.Contents {
+		item.clearHiddenState()
+	}
+	if activeSearch == target {
+		activeSearch = nil
+	}
+	target.searchOpen = false
+	if dragWin == target {
+		dragWin, dragFlow, dragPart = nil, nil, PART_NONE
+	}
+	if activeWindow == target {
+		activeWindow = nil
+		for i := len(windows) - 1; i >= 0; i-- {
+			if windows[i] != target && windows[i].Open {
+				activeWindow = windows[i]
+				break
+			}
+		}
+	}
 }
 
 // RemoveWindow removes a window from the active list. Any cached images
@@ -77,6 +111,7 @@ func (item *itemData) deallocate() {
 func (target *windowData) RemoveWindow() {
 	for i, win := range windows {
 		if win == target { // Compare pointers
+			win.clearInteraction()
 			windows = append(windows[:i], windows[i+1:]...)
 			win.deallocate()
 			win.Open = false
@@ -93,11 +128,12 @@ func NewWindow() *windowData {
 		currentTheme = baseTheme
 	}
 	newWindow := currentTheme.Window
-	// Window background colors are theme values unless the caller explicitly
-	// overrides them. Leaving the copied values here freezes the palette that
-	// was active when the window was created.
+	// Window colors are theme values unless the caller explicitly overrides
+	// them. Leaving the copied values here freezes the palette that was active
+	// when the window was created.
 	newWindow.BGColor = Color{}
 	newWindow.TitleBGColor = Color{}
+	newWindow.BorderColor = Color{}
 	// Default: windows can be maximized if desired by the app
 	newWindow.Maximizable = false
 	newWindow.Theme = currentTheme
@@ -118,6 +154,12 @@ func (win *windowData) backgroundColor() Color {
 		return currentTheme.Window.BGColor
 	}
 	return baseTheme.Window.BGColor
+}
+
+// BackgroundColor returns the window's resolved background color, including
+// its active theme when the window does not define an override.
+func (win *windowData) BackgroundColor() Color {
+	return win.backgroundColor()
 }
 
 func (win *windowData) titleBackgroundColor() Color {
@@ -197,6 +239,7 @@ func NewInput() (*itemData, *EventHandler) {
 		currentTheme = baseTheme
 	}
 	newItem := currentTheme.Input
+	newItem.SelectableText = true
 	if newItem.TextPtr == nil {
 		newItem.TextPtr = &newItem.Text
 	} else {
@@ -206,6 +249,15 @@ func NewInput() (*itemData, *EventHandler) {
 	newItem.Handler = h
 	newItem.Theme = currentTheme
 	return &newItem, h
+}
+
+// NewTextArea creates a bounded, multiline text input with horizontal and
+// vertical scrolling. Text is not soft-wrapped. Set AcceptTab for code editing.
+func NewTextArea() (*itemData, *EventHandler) {
+	item, events := NewInput()
+	item.Multiline = true
+	item.Size = Point{X: 360, Y: 180}
+	return item, events
 }
 
 // Create a new slider from the default theme
@@ -295,7 +347,10 @@ func NewText() (*itemData, *EventHandler) {
 	// Ensure a default text face is available immediately for code that
 	// queries metrics without drawing first.
 	if newItem.Face == nil {
-		newItem.Face = textFace(newItem.FontSize)
+		// Face is public and callers may mutate it. Keep EUI's shared faces
+		// private so their measured text can be cached safely.
+		face := *textFace(newItem.FontSize)
+		newItem.Face = &face
 	}
 	h := newHandler()
 	newItem.Handler = h
@@ -318,6 +373,23 @@ func NewProgressBar() (*itemData, *EventHandler) {
 // Bring a window to the front
 func (target *windowData) BringForward() {
 	if target.AlwaysDrawFirst {
+		// Background windows stay behind ordinary UI, but multiple background
+		// windows still need normal front-to-back behavior among themselves.
+		for index, win := range windows {
+			if win != target {
+				continue
+			}
+			front := index
+			for front+1 < len(windows) && windows[front+1].AlwaysDrawFirst {
+				front++
+			}
+			if front != index {
+				copy(windows[index:front], windows[index+1:front+1])
+				windows[front] = target
+			}
+			activeWindow = target
+			return
+		}
 		return
 	}
 	for w, win := range windows {
@@ -386,22 +458,16 @@ func (target *windowData) Toggle() {
 }
 
 func (target *windowData) Close() {
+	if target.BeforeClose != nil && !target.BeforeClose() {
+		return
+	}
 	closeDropdowns(target.Contents)
 	target.Open = false
+	target.clearInteraction()
 	if target.OnClose != nil {
 		target.OnClose()
 	}
 	target.deallocate()
-	//target.RemoveWindow()
-	if activeWindow == target {
-		activeWindow = nil
-		for i := len(windows) - 1; i >= 0; i-- {
-			if windows[i].Open {
-				activeWindow = windows[i]
-				break
-			}
-		}
-	}
 	if WindowStateChanged != nil {
 		WindowStateChanged()
 	}
@@ -412,6 +478,12 @@ func (target *windowData) Close() {
 // positioned adjacent to the anchor while trying to avoid overlapping the
 // anchor's parent window when possible and clamping to screen bounds.
 func (target *windowData) MarkOpenNear(anchor *itemData) {
+	// The workspace owns a docked pane's geometry; opening it must not
+	// move it next to a menu or a settings checkbox.
+	if target.Docked {
+		target.MarkOpen()
+		return
+	}
 	// Respect explicit zone placement: if a window has a zone, open it at
 	// the zone rather than near the anchor.
 	if target.zone != nil {

@@ -23,6 +23,32 @@ func TestTileDividerUsesWideGrabArea(t *testing.T) {
 	}
 }
 
+func TestDockedWindowHonorsAssignedSizeOnSmallWorkspace(t *testing.T) {
+	if err := Init(); err != nil {
+		t.Fatal(err)
+	}
+	oldScale := UIScale()
+	w, h := ScreenSize()
+	t.Cleanup(func() { SetUIScale(oldScale); SetScreenSize(w, h) })
+	SetScreenSize(640, 360)
+	for _, scale := range []float32{1, 2} {
+		SetUIScale(scale)
+		win := NewWindow()
+		win.Resizable = true
+		win.SetDocked(true)
+		want := Point{X: 32 * scale, Y: 40 * scale}
+		win.SetSize(want)
+		if win.GetSize() != want {
+			t.Fatal("docked window expanded outside its assigned tile")
+		}
+		win.SetDocked(false)
+		win.SetSize(want)
+		if win.GetSize() != (Point{X: MinWindowSize * scale, Y: MinWindowSize * scale}) {
+			t.Fatal("floating window lost its minimum size")
+		}
+	}
+}
+
 func TestDockedWindowHasNoStandaloneCornerDrag(t *testing.T) {
 	originalScale := uiScale
 	uiScale = 1
@@ -39,6 +65,22 @@ func TestDockedWindowHasNoStandaloneCornerDrag(t *testing.T) {
 	}
 }
 
+func TestDockedWindowRejectsDragAlreadyInProgress(t *testing.T) {
+	win := NewWindow()
+	win.Position = point{X: 20, Y: 20}
+	win.Size = point{X: 200, Y: 100}
+	win.Movable = true
+	win.Resizable = true
+	win.Docked = true
+
+	dragWindowMove(win, point{X: 40, Y: 30})
+	dragWindowResize(win, PART_BOTTOM_RIGHT, point{X: 40, Y: 30})
+
+	if win.Position != (point{X: 20, Y: 20}) || win.Size != (point{X: 200, Y: 100}) {
+		t.Fatalf("stale drag changed docked geometry: position=%v size=%v", win.Position, win.Size)
+	}
+}
+
 func TestDockedWindowDoesNotDrawStandaloneOutline(t *testing.T) {
 	win := NewWindow()
 	win.Outlined = true
@@ -49,6 +91,13 @@ func TestDockedWindowDoesNotDrawStandaloneOutline(t *testing.T) {
 	win.Docked = true
 	if win.drawsStandaloneOutline() {
 		t.Fatal("docked pane requested an outer window outline")
+	}
+	win.BorderColor = ColorBlue
+	if !win.drawsStandaloneOutline() {
+		t.Fatal("explicitly highlighted docked pane did not request its outline")
+	}
+	if got := win.borderColor(); got != ColorBlue {
+		t.Fatalf("explicit border color = %v, want %v", got, ColorBlue)
 	}
 }
 
@@ -130,5 +179,27 @@ func TestPointerCursorClaimedTracksEUIResizeCursor(t *testing.T) {
 	cursorShape = ebiten.CursorShapeDefault
 	if PointerCursorClaimed() {
 		t.Fatal("default cursor remained claimed by EUI")
+	}
+}
+
+func TestDockedWindowReopensWithoutMovingNearAnchor(t *testing.T) {
+	originalWindows, originalCallback := windows, WindowStateChanged
+	WindowStateChanged = nil
+	t.Cleanup(func() {
+		windows, WindowStateChanged = originalWindows, originalCallback
+	})
+	win := NewWindow()
+	win.Docked = true
+	win.Position = point{X: 20, Y: 30}
+	win.Size = point{X: 200, Y: 100}
+	position, size := win.Position, win.Size
+	anchor := &itemData{DrawRect: rect{X0: 400, Y0: 400, X1: 450, Y1: 425}}
+	win.MarkOpen()
+	for i := 0; i < 3; i++ {
+		win.Close()
+		win.MarkOpenNear(anchor)
+		if !win.IsOpen() || !win.Docked || win.Position != position || win.Size != size {
+			t.Fatalf("reopening moved or undocked the pane: open=%t docked=%t position=%v size=%v", win.IsOpen(), win.Docked, win.Position, win.Size)
+		}
 	}
 }

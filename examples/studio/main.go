@@ -4,6 +4,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"image/color"
 	"image/png"
 	"log"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	eui "github.com/Distortions81/EUI"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -33,6 +36,8 @@ type studio struct {
 	viewport                      *eui.WindowData
 	canvas                        *ebiten.Image
 	activity, progress, nameInput *eui.ItemData
+	editor, notebookTabs          *eui.ItemData
+	initialTab                    string
 	paletteDD, styleDD, accent    *eui.ItemData
 	messages                      []string
 	screenshot                    string
@@ -42,6 +47,7 @@ type studio struct {
 func label(s string, size float32, w, h float32) *eui.ItemData {
 	t := eui.NewLabel(s)
 	t.FontSize, t.Size = size, eui.Point{X: w, Y: h}
+	t.ConstrainToSize = true
 	return t
 }
 func gap(h float32) *eui.ItemData { return label("", 12, 1, h) }
@@ -70,8 +76,7 @@ func (s *studio) log(message string) {
 		s.messages = s.messages[len(s.messages)-5:]
 	}
 	if s.activity != nil {
-		s.activity.Text = strings.Join(s.messages, "\n\n")
-		s.activity.ParentWindow.Refresh()
+		s.activity.UpdateText(strings.Join(s.messages, "\n\n"))
 	}
 }
 func (s *studio) theme(name string) {
@@ -85,6 +90,9 @@ func (s *studio) theme(name string) {
 		s.log(err.Error())
 	}
 	s.tint = eui.AccentColor()
+	if s.editor != nil {
+		s.editor.RefreshTextHighlighting()
+	}
 	if s.accent != nil {
 		eui.SetColorSwatch(s.accent, s.tint)
 	}
@@ -258,7 +266,29 @@ func (s *studio) build() error {
 	about.Name = "About"
 	about.Size = eui.Point{X: 430, Y: 210}
 	about.AddItem(label("Small setup. Lots of possibilities.\n\nWindows, layouts, inputs, themes,\ndialogs, tooltips and color pickers.\n\nBuilt in Go. Rendered by Ebitengine.\nNo game assets. No external fonts.", 13, 428, 200))
-	tabs.Tabs = []*eui.ItemData{activity, recipe, about}
+	editorTab := eui.NewColumn()
+	editorTab.Name = "Editor"
+	editorTab.Size = eui.Point{X: 430, Y: 210}
+	editorTab.AddItem(eui.NewWrappedLabel("Edit, select, undo, and try wrapping a long line.", 426))
+	s.editor, _ = eui.NewTextArea()
+	s.editor.Text = "// Your editable playground\npackage main\nfunc main() {\n    message := \"Hello, EUI!\"\n    println(message)\n}"
+	s.editor.Size = eui.Point{X: 426, Y: 140}
+	s.editor.FontSize = 12
+	s.editor.AcceptTab = true
+	s.editor.SetTextHighlighter(highlightGo)
+	undo := button("Undo", 90, func() { s.editor.Undo() })
+	redo := button("Redo", 90, func() { s.editor.Redo() })
+	wrap := checkbox("Wrap lines", false, func(value bool) { s.editor.SetWordWrap(value) })
+	wrap.Size.X = 140
+	editorTab.AddItem(eui.NewRow(eui.NewSplitButton(undo, redo), wrap))
+	editorTab.AddItem(s.editor)
+	tabs.Tabs = []*eui.ItemData{activity, editorTab, recipe, about}
+	s.notebookTabs = tabs
+	for i, tab := range tabs.Tabs {
+		if tab.Name == s.initialTab {
+			tabs.ActiveTab = i
+		}
+	}
 	notebook.AddItem(tabs)
 	s.log("EUI Studio is ready")
 	s.log("Try a palette, then make it your own")
@@ -386,9 +416,10 @@ func (*studio) Layout(w, h int) (int, int) { return width, height }
 func main() {
 	screenshot := flag.String("screenshot", "", "write a PNG of the running example and exit")
 	palette := flag.String("theme", "AccentDark", "initial palette")
-	style := flag.String("style", "Breeze", "initial widget style")
+	style := flag.String("style", "Default", "initial widget style")
+	initialTab := flag.String("tab", "Activity", "initial notebook tab: Activity, Editor, Quick start, About")
 	flag.Parse()
-	s := &studio{speed: 0.75, count: 48, playing: true, grid: true, trails: true, sceneName: "Orbit garden / study 001", palette: *palette, style: *style, screenshot: *screenshot}
+	s := &studio{speed: 0.75, count: 48, playing: true, grid: true, trails: true, sceneName: "Orbit garden / study 001", palette: *palette, style: *style, screenshot: *screenshot, initialTab: *initialTab}
 	if err := s.build(); err != nil {
 		log.Fatal(err)
 	}
@@ -398,4 +429,40 @@ func main() {
 	if err := ebiten.RunGame(s); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// Tokenize only this example's Go snippets; the toolkit accepts any highlighter.
+func highlightGo(source string) []eui.TextColorSpan {
+	colors := eui.CurrentSyntaxColors()
+	files := token.NewFileSet()
+	file := files.AddFile("playground.go", -1, len(source))
+	var lexer scanner.Scanner
+	lexer.Init(file, []byte(source), func(token.Position, string) {}, scanner.ScanComments)
+	var spans []eui.TextColorSpan
+	for {
+		pos, tok, literal := lexer.Scan()
+		if tok == token.EOF {
+			break
+		}
+		var tint eui.Color
+		switch {
+		case tok == token.COMMENT:
+			tint = colors.Comments
+		case tok == token.STRING || tok == token.CHAR:
+			tint = colors.Strings
+		case tok.IsKeyword():
+			tint = colors.Keywords
+		case tok == token.INT || tok == token.FLOAT || tok == token.IMAG:
+			tint = colors.Numbers
+		default:
+			continue
+		}
+		start := file.Offset(pos)
+		end := min(len(source), start+len(literal))
+		if literal == "" {
+			end = min(len(source), start+len(tok.String()))
+		}
+		spans = append(spans, eui.TextColorSpan{Start: utf8.RuneCountInString(source[:start]), End: utf8.RuneCountInString(source[:end]), Color: tint})
+	}
+	return spans
 }

@@ -15,16 +15,6 @@ import (
 //go:embed themes/styles/*.json
 var embeddedStyles embed.FS
 
-var styleAliases = map[string]string{
-	"Default": "Breeze", "CleanLines": "Breeze", "MinimalPro": "Breeze",
-	"MinimalFade": "Flat", "SquareFlat": "Flat",
-	"NeoRounded": "Rounded", "SoftRound": "Rounded",
-	"RoundFlat": "Rounded", "RoundHybrid": "Rounded",
-	"MonoEdge": "Outline", "RoundOutline": "Outline", "SharpEdge": "Outline",
-	"SquareOutline": "Outline", "ThinOutline": "Outline",
-	"SolidBlock": "HighContrast",
-}
-
 // StyleTheme controls spacing and padding used by widgets.
 type StyleNumbers struct {
 	Window   float32
@@ -130,22 +120,31 @@ var defaultStyle = &StyleTheme{
 var (
 	baseStyle        = *defaultStyle
 	currentStyle     = defaultStyle
-	currentStyleName = "Breeze"
+	currentStyleName = "Default"
 )
 
 func LoadStyle(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Default"
+	}
 	// Try the user data directory first.
 	file := filepath.Join(themeDirectory, "styles", name+".json")
 	data, err := os.ReadFile(file)
 	if err != nil {
-		if replacement, ok := styleAliases[name]; ok {
-			name = replacement
-		}
 		// Fallback to embedded styles; embed paths must use forward slashes
 		data, err = embeddedStyles.ReadFile(path.Join("themes", "styles", name+".json"))
-		if err != nil {
-			return err
+		if err != nil && name != "Default" {
+			name = "Default"
+			data, err = embeddedStyles.ReadFile(path.Join("themes", "styles", name+".json"))
 		}
+	}
+	if err != nil {
+		return err
+	}
+	data = themeSourceText(data)
+	if err := ValidateStyleSource(data); err != nil {
+		return err
 	}
 	next := baseStyle
 	if err := json.Unmarshal(data, &next); err != nil {

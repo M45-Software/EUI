@@ -17,8 +17,8 @@ import (
 )
 
 func TestRenderUITextCache(t *testing.T) {
-	if os.Getenv("GOTHOOM_RENDER_TEXT_CACHE") == "" {
-		t.Skip("set GOTHOOM_RENDER_TEXT_CACHE=1")
+	if os.Getenv("EUI_RENDER_TEXT_CACHE") == "" {
+		t.Skip("set EUI_RENDER_TEXT_CACHE=1")
 	}
 	if err := EnsureFontSource(goregular.TTF); err != nil {
 		t.Fatal(err)

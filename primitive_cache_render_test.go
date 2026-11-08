@@ -14,8 +14,8 @@ import (
 
 // Run alone: coverage comparisons and timings require Ebitengine's game loop.
 func TestRenderPrimitiveCache(t *testing.T) {
-	if os.Getenv("GOTHOOM_RENDER_PRIMITIVE_CACHE") == "" {
-		t.Skip("set GOTHOOM_RENDER_PRIMITIVE_CACHE=1")
+	if os.Getenv("EUI_RENDER_PRIMITIVE_CACHE") == "" {
+		t.Skip("set EUI_RENDER_PRIMITIVE_CACHE=1")
 	}
 	uiPrimitives.clear()
 	defer uiPrimitives.clear()

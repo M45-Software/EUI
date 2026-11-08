@@ -1,5 +1,5 @@
 {
-  "Comment": "Inspired by KDE Breeze Light. Neutral surfaces, subtle borders, and an adjustable blue accent. Colors use #RRGGBBAA.",
+  "Comment": "Neutral light surfaces, subtle borders, and an adjustable blue accent. Colors use #RRGGBBAA.",
   "Colors": {
     "background": "#eff0f1ff",
     "panel": "#dee0e2ff",
@@ -13,9 +13,19 @@
     "highlight": "#a3d4faff",
     "disabled": "#e3e5e7ff",
     "disabledtext": "#6a747eff",
-    "shadow": "#00000060"
+    "shadow": "#00000060",
+    "disabledtoggle": "#838688ff",
+    "disabledtoggletext": "#33383dff"
   },
-  "RecommendedStyle": "Breeze",
+  "RecommendedStyle": "Default",
+  "Syntax": {
+    "Comments": "#2d692dff",
+    "Strings": "#914114ff",
+    "Keywords": "#2346aaff",
+    "Numbers": "#733791ff",
+    "Variables": "#006473ff",
+    "Bindings": "#8c3769ff"
+  },
   "Window": {
     "Padding": 8,
     "BGColor": "background",
@@ -58,9 +68,9 @@
     "HoverColor": "hover",
     "ClickColor": "accent",
     "OutlineColor": "outline",
-    "DisabledColor": "disabled",
+    "DisabledColor": "disabledtoggle",
     "SelectedColor": "highlight",
-    "DisabledTextColor": "disabledtext"
+    "DisabledTextColor": "disabledtoggletext"
   },
   "Radio": {
     "TextColor": "text",
@@ -68,9 +78,9 @@
     "HoverColor": "hover",
     "ClickColor": "accent",
     "OutlineColor": "outline",
-    "DisabledColor": "disabled",
+    "DisabledColor": "disabledtoggle",
     "SelectedColor": "highlight",
-    "DisabledTextColor": "disabledtext"
+    "DisabledTextColor": "disabledtoggletext"
   },
   "Input": {
     "TextColor": "text",

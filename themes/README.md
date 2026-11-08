@@ -10,7 +10,7 @@ Apply a palette and style from Go code:
 if err := eui.LoadTheme("AccentDark"); err != nil {
     log.Println(err)
 }
-if err := eui.LoadStyle("Breeze"); err != nil {
+if err := eui.LoadStyle("Default"); err != nil {
     log.Println(err)
 }
 ```
@@ -39,7 +39,7 @@ Color palettes live under `themes/palettes`. Each file defines a `Colors` map fo
   },
   "Button": { "TextColor": "accent", "Color": "panel" },
   ...
-  "RecommendedStyle": "Breeze"
+  "RecommendedStyle": "Default"
 }
 ```
 
@@ -51,11 +51,29 @@ Each widget block (`Window`, `Button`, `Text`, `Checkbox`, `Radio`, `Input`, `Sl
 - `ClickColor` – color when the widget is clicked
 - `OutlineColor` – color of the outline if enabled
 - `DisabledColor` – background color when the widget is disabled
-- `DisabledTextColor` – optional separate disabled caption color; omitted palettes retain the legacy single-color disabled appearance
+- `DisabledTextColor` – optional separate disabled caption color; omitted values use `DisabledColor` for captions
 - `SelectedColor` – color for selected state (tabs, sliders, dropdowns)
 - `MaxVisible` – for dropdowns, the maximum visible entries (0 shows as many as fit on screen)
 
 The `Window` block also supports `TitleColor`, `TitleBGColor`, `BorderColor`, `SizeTabColor`, `DragbarColor`, `HoverTitleColor`, `HoverColor`, `ActiveColor` and `TitleTextColor`.
+
+The `Syntax` block supplies colors for source editors:
+
+```json
+"Syntax": {
+  "Comments": "#91c891ff",
+  "Strings": "#ebbe82ff",
+  "Keywords": "#78beffff",
+  "Numbers": "#cda5f0ff",
+  "Variables": "#78d7dcff",
+  "Bindings": "#eba0c8ff"
+}
+```
+
+These fields accept the same color formats and named references as widget colors.
+The embedding application chooses how to assign these colors to source ranges.
+Omitted fields use light or dark defaults based on the input background.
+Call `RefreshTextHighlighting` on open editors after changing external inputs.
 
 `RecommendedStyle` hints at a style theme that pairs well with the palette.
 
@@ -89,12 +107,10 @@ Style themes are stored in `themes/styles`. They modify padding, border radius a
 - `Outlined` – whether an outline is drawn
 - `ActiveOutline` – highlight outline when active (tabs)
 
-## Breeze-inspired defaults
+## Default themes
 
-`AccentDark` and `AccentLight` use the neutral surfaces and blue accent of
-[KDE Breeze Dark](https://github.com/KDE/breeze/blob/master/colors/BreezeDark.colors)
-and [Breeze Light](https://github.com/KDE/breeze/blob/master/colors/BreezeLight.colors).
-Both recommend the `Breeze` style: thin borders, restrained corner rounding,
+`AccentDark` and `AccentLight` use neutral surfaces and an adjustable blue accent.
+Both recommend the `Default` style: thin borders, restrained corner rounding,
 and consistent control padding. Hover and disabled colors are adapted to EUI.
 The accent remains adjustable, and another style can still be chosen separately.
 
@@ -104,12 +120,12 @@ Each palette has a distinct purpose:
 
 | Palette | Character | Recommended style |
 | --- | --- | --- |
-| AccentDark | Breeze charcoal surfaces and an adjustable blue accent | Breeze |
-| AccentLight | Breeze light gray surfaces and an adjustable blue accent | Breeze |
+| AccentDark | Charcoal surfaces and an adjustable blue accent | Default |
+| AccentLight | Light gray surfaces and an adjustable blue accent | Default |
 | NeonNight | Dark violet, purple borders, and luminous cyan selections | Rounded |
 | Midnight | Pure black backgrounds with restrained silver accents | Flat |
 | Paper | Warm ivory and sepia for a softer light appearance | Rounded |
-| Forest | Evergreen surfaces and muted sage accents | Breeze |
+| Forest | Evergreen surfaces and muted sage accents | Default |
 | Dusk | Warm plum surfaces and rose accents | Rounded |
 | HighContrast | Black and white with yellow selections and strong boundaries | HighContrast |
 | Arcade | Navy surfaces, lime selections, and bold orange borders for a playful dark look | HighContrast |
@@ -121,19 +137,12 @@ Styles can be paired with any palette:
 
 | Style | Geometry |
 | --- | --- |
-| Breeze | Thin borders, modest rounding, balanced padding |
+| Default | Thin borders, modest rounding, balanced padding |
 | Flat | Compact controls, quiet fills, minimal button borders |
 | Borderless | Soft filled controls; no window, control, or tab outlines |
 | Rounded | Softer corners and roomier content padding |
 | Outline | Square, unfilled buttons with visible control boundaries |
 | HighContrast | Square corners, two-pixel borders, generous content padding |
-
-Retired names in saved settings map to their closest replacement. For example,
-`Black` loads `Midnight`, `ForestMist` loads `Forest`, and `SoftNeutral` loads
-`Paper`. Old rounded styles load `Rounded`, outline styles load `Outline`,
-and `SolidBlock` loads `HighContrast`. A user-authored file with an old name
-still takes priority. `AccentDark`, `AccentLight`, and `NeonNight` retain their
-names.
 
 Use `eui.ListThemes()` and `eui.ListStyles()` to get these names at runtime.
 
@@ -149,7 +158,7 @@ On first run the client writes an `Example.json` palette and style alongside thi
 ## Other Customizations
 
 - **Background and splash images** – place `background.png` and/or `splash.png` at the root of the user data folder to override the startup visuals.
-- **Sound font** – drop a `soundfont.sf2` file into the user data folder to replace the default music instrument set. The Download Files window can fetch a recommended one or you can supply any General MIDI sound font.
+- **SoundFont** – `qt.sf2` is included for bard music. Choose it or another instrument set in **Settings → Audio → Music SoundFont**. **Download Files** offers the optional `soundfont.sf2`; add other `.sf2` files to the **Assets & Audio** folder to make them available in the same menu.
 - **TTS voices** – download Piper voices (`.tar.gz` archives or `.onnx` with matching `.onnx.json`) and place them in `piper/voices` under the user data folder. Use the Download Files window for English voices or fetch others from online voice collections.
 
 ## Readability and style switching
@@ -178,19 +187,19 @@ spacing, and position so previewing cannot move options under the pointer.
 
 ## Color picker
 
-`NewColorSwatch` creates a compact color swatch. Click one to open a
+Appearance and Text Colors show compact color swatches. Click one to open a
 picker with a wheel and controls for hue, saturation, brightness, and opacity.
-Apply invokes the supplied callback with the color; Cancel or closing the picker leaves the original color
+Apply saves the color; Cancel or closing the picker leaves the original color
 intact.
 
 ## Visual checks
 
-From the repository root, render the built-in palettes and styles with normal, hovered,
+From `source/`, render the built-in palettes and styles with normal, hovered,
 pressed, disabled, selected, and custom-accent states:
 
 ```sh
 EUI_RENDER_THEME_GALLERY=1 EUI_THEME_GALLERY_DIR=/tmp/eui-themes \
-  xvfb-run -a go test . -run '^TestRenderThemeGallery$' -count=1
+  xvfb-run -a go test ./eui -run '^TestRenderThemeGallery$' -count=1
 ```
 
 This opt-in test also checks clipped border pixels and monochrome icon contrast.
@@ -236,12 +245,12 @@ create new entries. Switching Potato GPU mode clears the cache. Unusually large
 or complex shapes fall back to vector rendering. Whole-window caching still
 avoids redrawing unchanged controls, and open dropdowns can reuse the shapes too.
 
-From the repository root, compare cached coverage against the vector paths and measure a
+From `source/`, compare cached coverage against the vector paths and measure a
 repeated-control workload:
 
 ```sh
 EUI_RENDER_PRIMITIVE_CACHE=1 \
-  xvfb-run -a go test . -run '^TestRenderPrimitiveCache$' -count=1 -v
+  xvfb-run -a go test ./eui -run '^TestRenderPrimitiveCache$' -count=1 -v
 ```
 
 The check covers clipping, multiple scales, translucent colors, cache reuse,
@@ -249,3 +258,11 @@ and both cache limits. It allows one antialiasing sample at a few boundary
 pixels where translating a vector curve changes floating-point rounding.
 Its timing includes readback and is a focused rendering comparison, not a
 measurement of the client's overall frame rate.
+
+## Editor colors and source validation
+
+A palette may include a `Syntax` object with `Comments`, `Strings`, `Keywords`,
+`Numbers`, `Variables`, and `Bindings`. `CurrentSyntaxColors()` returns the
+active palette; omitted values use readable light/dark defaults.
+`ValidateThemeSource` and `ValidateStyleSource` check JSON without applying it.
+`EditableThemeFile` creates overrides while preserving references and user files.
