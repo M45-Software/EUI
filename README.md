@@ -7,7 +7,7 @@ panels, and desktop tools with embedded fonts, palettes, and styles.
 
 ## Install
 
-Requires **Go 1.27.1 or newer** and targets **Ebitengine 2.10.2**.
+Requires **Go 1.27.3 or newer** and targets **Ebitengine 2.10.6**.
 Desktop builds support `CGO_ENABLED=0` and require the usual display and graphics
 runtime libraries; see [development setup](docs/development.md).
 

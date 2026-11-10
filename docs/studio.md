@@ -3,7 +3,7 @@
 [Project overview](../README.md) · [API reference](api/README.md)
 
 
-Requires **Go 1.27.1**. EUI targets **Ebitengine 2.10.2**; desktop builds support
+Requires **Go 1.27.3**. EUI targets **Ebitengine 2.10.6**; desktop builds support
 `CGO_ENABLED=0` and need the usual display/graphics runtime libraries.
 
 ```sh

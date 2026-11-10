@@ -10,10 +10,10 @@ jobs:
       CGO_ENABLED: "0"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version-file: go.mod
           cache: true
       - name: Native dependencies
         run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev xvfb
@@ -44,7 +44,7 @@ jobs:
           xvfb-run -a go test -run '^$' -bench '^BenchmarkLargeInterface($|Frames$)' -benchtime=1x -count=1 -benchmem . | tee /tmp/large-ui-benchmarks.txt
           xvfb-run -a go test -run '^$' -bench '^BenchmarkDocumentEdits$' -benchtime=1x -count=1 -benchmem . | tee /tmp/document-benchmarks.txt
       - name: Preserve performance smoke results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: large-ui-linux
           path: |
@@ -74,10 +74,10 @@ jobs:
     env:
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version-file: go.mod
           cache: true
       - name: Unit, integration, and replay sequences
         run: go test -count=1 -timeout=3m -tags 'integration test' ./...
@@ -87,7 +87,7 @@ jobs:
         run: go run ./examples/studio -width 960 -height 800 -tab Editor -screenshot studio-native.png
       - name: Preserve native render
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: studio-${{ matrix.os }}
           path: studio-native.png
