@@ -1,6 +1,6 @@
 module github.com/M45-Software/EUI
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/go-text/typesetting v0.3.5
